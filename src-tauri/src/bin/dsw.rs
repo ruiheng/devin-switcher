@@ -229,37 +229,89 @@ fn cmd_login(name: &str) -> Result<(), String> {
     eprintln!("1. open this URL in any browser (it asks which account to use):");
     eprintln!("\n     {}\n", m.url);
     eprintln!("2. sign in — the page shows a code\n");
-    eprintln!("3. paste it here (input hidden):");
-    let mut tok = String::new();
-    #[cfg(unix)]
-    {
-        let _ = std::process::Command::new("stty").arg("-echo").status();
-        std::io::stdin()
-            .read_line(&mut tok)
-            .map_err(|e| e.to_string())?;
-        let _ = std::process::Command::new("stty").arg("echo").status();
-        eprintln!();
-    }
-    #[cfg(not(unix))]
-    {
-        std::io::stdin()
-            .read_line(&mut tok)
-            .map_err(|e| e.to_string())?;
-    }
-    let _ = std::io::stdout().flush();
-    let input = tok.trim();
+    eprintln!("3. paste it here (echoed as *):");
+    let input = read_secret()?;
     if input.is_empty() {
         return Err("nothing pasted".into());
     }
     // A session token saves directly; a code trades through the PKCE
     // exchange first.
     let p = if input.starts_with("devin-session-token") {
-        ops::add_token(name, input)?
+        ops::add_token(name, &input)?
     } else {
-        let creds = login::manual_finish(&m, input)?;
+        let creds = login::manual_finish(&m, &input)?;
         ops::save_creds(&creds, name)?
     };
     println!("saved");
     show_profile(&p);
     Ok(())
+}
+
+/// Read a secret with per-char `*` feedback instead of raw echo, so a
+/// paste visibly registers. Unix: cbreak+noecho via stty, reading bytes
+/// one at a time and handling backspace. Non-tty stdin (a pipe) just
+/// reads a line — nothing to echo anyway.
+#[cfg(unix)]
+fn read_secret() -> Result<String, String> {
+    use std::io::Read;
+    if !atty_stdin() {
+        let mut s = String::new();
+        std::io::stdin()
+            .read_line(&mut s)
+            .map_err(|e| e.to_string())?;
+        return Ok(s.trim().to_string());
+    }
+    let stty = |args: &[&str]| {
+        let _ = std::process::Command::new("stty").args(args).status();
+    };
+    stty(&["-icanon", "-echo", "min", "1", "time", "0"]);
+    let mut out = Vec::new();
+    let mut buf = [0u8; 1];
+    let mut stdin = std::io::stdin().lock();
+    loop {
+        match stdin.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => match buf[0] {
+                b'\n' | b'\r' => break,
+                0x7f | 0x08 => {
+                    if out.pop().is_some() {
+                        eprint!("\x08 \x08"); // erase one '*'
+                    }
+                }
+                b => {
+                    out.push(b);
+                    eprint!("*");
+                }
+            },
+        }
+    }
+    let _ = std::io::stderr().flush();
+    stty(&["icanon", "echo"]);
+    eprintln!();
+    Ok(String::from_utf8(out)
+        .map_err(|e| e.to_string())?
+        .trim()
+        .to_string())
+}
+
+#[cfg(not(unix))]
+fn read_secret() -> Result<String, String> {
+    let mut s = String::new();
+    std::io::stdin()
+        .read_line(&mut s)
+        .map_err(|e| e.to_string())?;
+    Ok(s.trim().to_string())
+}
+
+#[cfg(unix)]
+fn atty_stdin() -> bool {
+    // `tty -s`-style probe via stty: succeeds only on a real terminal.
+    std::process::Command::new("stty")
+        .arg("-a")
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
