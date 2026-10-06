@@ -229,7 +229,7 @@ fn cmd_login(name: &str) -> Result<(), String> {
     eprintln!("1. open this URL in any browser (it asks which account to use):");
     eprintln!("\n     {}\n", m.url);
     eprintln!("2. sign in — the page shows a code\n");
-    eprintln!("3. paste it here (echoed as *):");
+    eprintln!("3. paste it here:");
     let input = read_secret()?;
     if input.is_empty() {
         return Err("nothing pasted".into());
