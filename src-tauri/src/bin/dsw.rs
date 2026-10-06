@@ -2,17 +2,16 @@
 //! usable over SSH on machines without a desktop.
 //!
 //!   dsw status                  current sign-in + quota + running devin procs
-//!   dsw list                    all profiles, active marked with *
-//!   dsw save [name]             save the current sign-in as a profile
-//!   dsw use <name>              switch CLI/Desktop to a profile
-//!   dsw rename <from> <to>      rename a profile
-//!   dsw delete <name>           remove a profile's saved credentials
-//!   dsw refresh <name>          re-fetch a profile's quota
+//!   dsw list                    all saved accounts, active marked with *
+//!   dsw save [name]             save the current sign-in as an account
+//!   dsw use <name>              switch CLI/Desktop to a saved account
+//!   dsw rename <from> <to>      rename a saved account
+//!   dsw delete <name>           remove a saved account's credentials
+//!   dsw refresh <name>          re-fetch a saved account's quota
 //!   dsw login [name]            add an account: prompts for a session token
 //!   dsw add-token <token> [name]  same, non-interactive (token as argument)
 //!   dsw parallel <name> [cwd]   print a command for a parallel isolated session
 
-use std::io::Write;
 use std::process::ExitCode;
 
 use devin_switch_lib::login;
@@ -68,7 +67,7 @@ fn quota_lines(u: &Usage, indent: &str) -> Vec<String> {
     out
 }
 
-fn show_profile(p: &ProfileInfo) {
+fn show_account(p: &ProfileInfo) {
     let mark = if p.is_active { "*" } else { " " };
     let id = [p.meta.email.as_str(), p.meta.display_name.as_str()]
         .into_iter()
@@ -93,13 +92,13 @@ fn show_profile(p: &ProfileInfo) {
 fn usage() -> &'static str {
     "usage: dsw <command>\n\
      \x20 status                current sign-in, quota, running devin processes\n\
-     \x20 list                  profiles (* = active)\n\
+     \x20 list                  saved accounts (* = active)\n\
      \x20 save [name]           save the current sign-in (name auto-derived)\n\
-     \x20 use <name>            switch CLI/Desktop to a profile\n\
-     \x20 rename <from> <to>    rename a profile\n\
-     \x20 delete <name>         remove a profile\n\
-     \x20 refresh <name>        re-fetch a profile's quota\n\
-     \x20 login [name]            add an account (prompts for a session token)\n\
+     \x20 use <name>            switch CLI/Desktop to a saved account\n\
+     \x20 rename <from> <to>    rename a saved account\n\
+     \x20 delete <name>         remove a saved account\n\
+     \x20 refresh <name>        re-fetch a saved account's quota\n\
+     \x20 login [name]          add an account (prompts for a session token)\n\
      \x20 add-token <token> [name]  same, non-interactive\n\
      \x20 parallel <name> [cwd] print a command to run a parallel session"
 }
@@ -112,11 +111,11 @@ fn main() -> ExitCode {
         "list" | "ls" => cmd_list(),
         "save" => ops::save_current(args.get(1).map(String::as_str).unwrap_or(""), "").map(|p| {
             println!("saved as \"{}\"", p.name);
-            show_profile(&p);
+            show_account(&p);
         }),
         "use" => args
             .get(1)
-            .ok_or_else(|| "use needs a profile name".to_string())
+            .ok_or_else(|| "use needs an account name".to_string())
             .and_then(|n| ops::use_profile(n))
             .map(|r| {
                 let who = if r.auth.logged_in {
@@ -135,25 +134,25 @@ fn main() -> ExitCode {
         },
         "delete" | "rm" => args
             .get(1)
-            .ok_or_else(|| "delete needs a profile name".to_string())
+            .ok_or_else(|| "delete needs an account name".to_string())
             .and_then(|n| store::remove(n))
             .map(|_| println!("deleted")),
         "refresh" => args
             .get(1)
-            .ok_or_else(|| "refresh needs a profile name".to_string())
+            .ok_or_else(|| "refresh needs an account name".to_string())
             .and_then(|n| ops::refresh_usage(n))
-            .map(|p| show_profile(&p)),
+            .map(|p| show_account(&p)),
         "add-token" => {
             let Some(tok) = args.get(1) else {
                 return done(Err("add-token needs a token".into()));
             };
             ops::add_token(args.get(2).map(String::as_str).unwrap_or(""), tok)
-                .map(|p| show_profile(&p))
+                .map(|p| show_account(&p))
         }
         "login" | "add" => cmd_login(args.get(1).map(String::as_str).unwrap_or("")),
         "parallel" | "par" => args
             .get(1)
-            .ok_or_else(|| "parallel needs a profile name".to_string())
+            .ok_or_else(|| "parallel needs an account name".to_string())
             .and_then(|n| ops::launch_parallel(n, args.get(2).map(String::as_str)))
             .map(|r| {
                 if r.launched {
@@ -209,12 +208,12 @@ fn cmd_status() -> Result<(), String> {
 }
 
 fn cmd_list() -> Result<(), String> {
-    let profiles = store::list();
-    if profiles.is_empty() {
-        println!("no profiles — `dsw save` the current sign-in or `dsw login`");
+    let accounts = store::list();
+    if accounts.is_empty() {
+        println!("no saved accounts — `dsw save` the current sign-in or `dsw login`");
     }
-    for p in &profiles {
-        show_profile(p);
+    for p in &accounts {
+        show_account(p);
     }
     Ok(())
 }
@@ -243,7 +242,7 @@ fn cmd_login(name: &str) -> Result<(), String> {
         ops::save_creds(&creds, name)?
     };
     println!("saved");
-    show_profile(&p);
+    show_account(&p);
     Ok(())
 }
 

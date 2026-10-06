@@ -1,7 +1,7 @@
 # Devin Switch
 
-在多个 Devin 账号之间一键切换的小工具：把 `credentials.toml` 按账号存成
-profile，切换时原子替换 + 更新 `config.json` 的 `org_id`，CLI 和 Desktop
+在多个 Devin 账号之间一键切换的小工具：把 `credentials.toml` 按账号存入
+vault，切换时原子替换 + 更新 `config.json` 的 `org_id`，CLI 和 Desktop
 共用同一份凭据所以一次切换两头生效（正在运行的 CLI/Desktop 进程需重启）。
 
 两个入口，同一套后端、同一个 vault：
@@ -14,7 +14,7 @@ profile，切换时原子替换 + 更新 `config.json` 的 `org_id`，CLI 和 De
 - 账号卡片列表：邮箱、plan、额度进度条（当日/本周剩余百分比、ACU、超额余额）
 - 三种添加方式：浏览器登录（强制账号选择器，不吃已登录 session）、
   保存当前登录、手动 code/token 粘贴（可远程用）
-- 同账号重复添加自动刷新原 profile，不产生 `-2` 副本；自动按邮箱命名，可改名
+- 同账号重复添加自动刷新原条目，不产生 `-2` 副本；自动按邮箱命名，可改名
 - "并行运行"：给另一个账号起隔离的 `XDG_DATA_HOME` 开并行 devin 会话
 - GUI 中英双语（按系统语言自动检测，右上角可切换）
 
@@ -71,9 +71,9 @@ cd src-tauri && cargo test
 
 ```
 dsw status                  当前登录 + 额度 + 运行中的 devin 进程
-dsw list                    所有 profile（* = 当前激活）
-dsw save [name]             保存当前登录为 profile
-dsw use <name>              切换到某 profile
+dsw list                    所有已保存账号（* = 当前激活）
+dsw save [name]             保存当前登录
+dsw use <name>              切换到某账号
 dsw rename <from> <to>      改名
 dsw delete <name>           删除
 dsw refresh <name>          重新拉取该账号额度

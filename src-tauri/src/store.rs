@@ -8,16 +8,16 @@ use crate::paths;
 pub fn sanitize_name(name: &str) -> Result<String, String> {
     let n = name.trim();
     if n.is_empty() {
-        return Err("profile name is empty".into());
+        return Err("account name is empty".into());
     }
     if n.len() > 64 {
-        return Err("profile name too long (max 64)".into());
+        return Err("account name too long (max 64)".into());
     }
     if !n
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
     {
-        return Err("profile name may only contain letters, digits, - _ . @".into());
+        return Err("account name may only contain letters, digits, - _ . @".into());
     }
     Ok(n.to_string())
 }
@@ -66,13 +66,13 @@ pub fn rename(from: &str, to: &str) -> Result<ProfileInfo, String> {
     }
     let src = paths::profile_dir(&from);
     if !src.exists() {
-        return Err(format!("no such profile: {from}"));
+        return Err(format!("no such account: {from}"));
     }
     let dst = paths::profile_dir(&to);
     if dst.exists() {
-        return Err(format!("profile \"{to}\" already exists"));
+        return Err(format!("account \"{to}\" already exists"));
     }
-    fs::rename(&src, &dst).map_err(|e| format!("rename profile: {e}"))?;
+    fs::rename(&src, &dst).map_err(|e| format!("rename account: {e}"))?;
     Ok(info(&to))
 }
 
@@ -110,14 +110,14 @@ pub fn remove(name: &str) -> Result<(), String> {
     let name = sanitize_name(name)?;
     let dir = paths::profile_dir(&name);
     if !dir.exists() {
-        return Err(format!("no such profile: {name}"));
+        return Err(format!("no such account: {name}"));
     }
     fs::remove_dir_all(&dir).map_err(|e| e.to_string())
 }
 
 pub fn creds_of(name: &str) -> Result<Vec<u8>, String> {
     fs::read(creds_file(&paths::profile_dir(&sanitize_name(name)?)))
-        .map_err(|e| format!("read profile credentials: {e}"))
+        .map_err(|e| format!("read account credentials: {e}"))
 }
 
 fn meta_of(dir: &Path) -> Meta {

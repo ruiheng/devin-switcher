@@ -24,7 +24,7 @@ const I18N = {
     loginHint:
       "Sign in with a browser. The page asks which account to use — your existing devin.ai session won't auto-apply. Open the link in any browser or an incognito window.",
     loginName:
-      "The profile is named after the account's email — rename it from the card afterwards.",
+      "The account is named after its email — rename it from the card afterwards.",
     startLogin: "Start sign-in",
     waiting: "Waiting for sign-in…",
     copy: "Copy",
@@ -39,7 +39,10 @@ const I18N = {
     getLink: "Get sign-in link",
     codeOrToken: "Code or token",
     saveToken: "Save",
-    noProfiles: "No profiles yet.<br>Add your first account below.",
+    savedAccounts: "SAVED ACCOUNTS",
+    noProfiles: "No saved accounts yet.<br>Add your first account below.",
+    noProfilesSignedIn:
+      "No saved accounts yet — the current sign-in isn't saved.",
     unknown: "unknown account",
     swUse: "Switch",
     swPar: "Run in parallel",
@@ -64,8 +67,8 @@ const I18N = {
     linkCopied: "Link copied — open it in any browser or incognito window",
     tokenReq: "Token required",
     delConfirm: (n) =>
-      `Delete profile "${n}"? Its saved credentials are removed.`,
-    renamePrompt: "Rename profile",
+      `Delete account "${n}"? Its saved credentials are removed.`,
+    renamePrompt: "Rename account",
   },
   zh: {
     currentTag: "当前登录",
@@ -80,7 +83,7 @@ const I18N = {
     tabToken: "粘贴 token",
     loginHint:
       "在浏览器中登录。页面会强制让你选账号——已登录的 devin.ai 会话不会被自动复用。链接可以在任何浏览器或隐身窗口打开。",
-    loginName: "profile 会用账号邮箱自动命名，之后可在卡片上改名。",
+    loginName: "账号会按邮箱自动命名，之后可在卡片上改名。",
     startLogin: "开始登录",
     waiting: "等待登录…",
     copy: "复制",
@@ -88,14 +91,16 @@ const I18N = {
     terminalInstead: "或者在终端里运行",
     cancel: "取消",
     currentHint:
-      "保存 devin CLI 当前登录的账号。profile 会按邮箱自动命名。",
+      "保存 devin CLI 当前登录的账号。账号会按邮箱自动命名。",
     saveCurrent: "保存当前登录",
     tokenHint:
       "生成登录链接，在任何浏览器打开——登录后页面会显示一个 code。把 code（或 devin-session-token$…）粘贴到下面。",
     getLink: "生成登录链接",
     codeOrToken: "Code 或 token",
     saveToken: "保存",
-    noProfiles: "还没有 profile。<br>在下方添加第一个账号。",
+    savedAccounts: "已保存的账号",
+    noProfiles: "还没有保存的账号。<br>在下方添加第一个账号。",
+    noProfilesSignedIn: "还没有保存的账号——当前登录的账号未保存。",
     unknown: "未知账号",
     swUse: "切换",
     swPar: "并行运行",
@@ -118,8 +123,8 @@ const I18N = {
     runThis: (c) => `在终端中运行：${c}`,
     linkCopied: "链接已复制——可在任何浏览器或隐身窗口打开",
     tokenReq: "需要 token",
-    delConfirm: (n) => `删除 profile「${n}」？保存的凭据将被移除。`,
-    renamePrompt: "重命名 profile",
+    delConfirm: (n) => `删除账号「${n}」？保存的凭据将被移除。`,
+    renamePrompt: "重命名账号",
   },
 };
 
@@ -151,6 +156,11 @@ $("langBtn").onclick = () => {
 
 let loginId = null;
 let loginTimer = null;
+// Whether the CLI is signed in, and whether that sign-in already matches a
+// saved account — controls the "Save current" tab's visibility. Defaults
+// keep the tab until the first refresh() says otherwise.
+let signedIn = true;
+let activeSaved = false;
 
 function toast(msg, isErr = false) {
   const t2 = $("toast");
@@ -167,7 +177,7 @@ async function refresh() {
       invoke("list_profiles"),
     ]);
     renderStatus(status);
-    renderProfiles(profiles);
+    renderProfiles(profiles, status);
   } catch (e) {
     toast(String(e), true);
   }
@@ -249,15 +259,27 @@ function quotaHtml(u) {
 
 const r2 = (f) => Math.round(f * 100) / 100;
 
-function renderProfiles(profiles) {
+function renderProfiles(profiles, status) {
   const el = $("profiles");
   // The banner only earns its space when the live sign-in is NOT a saved
   // profile (signed out, or an unsaved account). When it matches a card,
   // the ACTIVE badge already says it — hide the banner instead.
   const active = profiles.find((p) => p.is_active);
+  signedIn = !!status?.auth?.logged_in;
+  activeSaved = !!active;
   $("current").classList.toggle("hidden", !!active);
   if (!profiles.length) {
-    el.innerHTML = `<p class="sub" style="text-align:center;margin:24px 0">${t("noProfiles")}</p>`;
+    el.innerHTML = `<p class="sub empty">${t(
+      signedIn ? "noProfilesSignedIn" : "noProfiles"
+    )}</p>`;
+    if (signedIn) {
+      const b = document.createElement("button");
+      b.className = "primary";
+      b.style.alignSelf = "center";
+      b.textContent = t("saveCurrent");
+      b.onclick = saveCurrent;
+      el.appendChild(b);
+    }
     return;
   }
   el.innerHTML = "";
@@ -357,7 +379,16 @@ async function del(name) {
 
 // ---- Add sheet ----
 
-$("addBtn").onclick = () => $("sheet").classList.remove("hidden");
+$("addBtn").onclick = () => {
+  // "Save current" only makes sense when there's an unsaved sign-in.
+  const cur = document.querySelector('.tab[data-tab="current"]');
+  const show = signedIn && !activeSaved;
+  cur.classList.toggle("hidden", !show);
+  if (!show && cur.classList.contains("active")) {
+    document.querySelector('.tab[data-tab="login"]').click();
+  }
+  $("sheet").classList.remove("hidden");
+};
 $("closeSheet").onclick = closeSheet;
 
 function closeSheet() {
@@ -376,7 +407,7 @@ for (const t2 of document.querySelectorAll(".tab")) {
   };
 }
 
-$("saveCurrent").onclick = async () => {
+async function saveCurrent() {
   try {
     const p = await invoke("save_current", { name: "", note: "" });
     toast(t("savedAs", p.name));
@@ -385,7 +416,9 @@ $("saveCurrent").onclick = async () => {
   } catch (e) {
     toast(String(e), true);
   }
-};
+}
+
+$("saveCurrent").onclick = saveCurrent;
 
 $("tokenLink").onclick = async () => {
   try {
