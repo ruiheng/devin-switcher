@@ -40,10 +40,8 @@
         <p class="hint">Sign in with a browser. The page asks which account to
         use — your existing devin.ai session won't auto-apply. You may open
         the link in any browser or an incognito window.</p>
-        <div class="field">
-          <label>Profile name</label>
-          <input id="loginName" placeholder="e.g. work, personal" autocomplete="off">
-        </div>
+        <p class="hint">The new profile is named after the account's email —
+        rename it from the card afterwards if you like.</p>
         <button id="startLogin" class="primary">Start sign-in</button>
         <div id="loginWait" class="hidden">
           <p class="wait-text">Waiting for sign-in…</p>
@@ -61,21 +59,14 @@
       </div>
 
       <div class="tabpane hidden" id="tab-current">
-        <p class="hint">Save the account the devin CLI is signed in as right now.</p>
-        <div class="field">
-          <label>Profile name</label>
-          <input id="currentName" placeholder="e.g. work, personal" autocomplete="off">
-        </div>
+        <p class="hint">Save the account the devin CLI is signed in as right
+        now. It's named after the account's email automatically.</p>
         <button id="saveCurrent" class="primary">Save current sign-in</button>
       </div>
 
       <div class="tabpane hidden" id="tab-token">
         <p class="hint">Paste a <code>devin-session-token$…</code> from the
         sign-in page of a logged-in devin.ai session (any browser profile).</p>
-        <div class="field">
-          <label>Profile name</label>
-          <input id="tokenName" placeholder="e.g. work, personal" autocomplete="off">
-        </div>
         <div class="field">
           <label>Token</label>
           <input id="tokenValue" placeholder="devin-session-token$…" autocomplete="off">

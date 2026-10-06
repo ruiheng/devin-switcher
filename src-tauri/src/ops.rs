@@ -95,15 +95,34 @@ pub fn running_devin_processes() -> Vec<String> {
         .collect()
 }
 
+/// Profile name from the account's identity: email local part, else
+/// display name, else "account". Empty `want` means auto.
+fn pick_name(want: &str, u: &Usage) -> Result<String, String> {
+    if !want.trim().is_empty() {
+        return store::sanitize_name(want);
+    }
+    let hint = u
+        .email
+        .split('@')
+        .next()
+        .filter(|s| !s.is_empty())
+        .or(if u.name.is_empty() {
+            None
+        } else {
+            Some(u.name.as_str())
+        })
+        .map(str::to_string)
+        .unwrap_or_else(|| "account".into());
+    Ok(store::unique_name(&hint))
+}
+
 /// Save whatever the CLI is currently signed in as.
 pub fn save_current(name: &str, note: &str) -> Result<ProfileInfo, String> {
     let creds =
         fs::read(paths::credentials_path()).map_err(|_| "Devin isn't signed in".to_string())?;
-    store::save(
-        name,
-        &creds,
-        &meta_from(account_of(&creds), config::current_org_id(), note),
-    )
+    let u = account_of(&creds);
+    let name = pick_name(name, &u)?;
+    store::save(&name, &creds, &meta_from(u, config::current_org_id(), note))
 }
 
 /// Finish a login round (PKCE callback or CLI-in-fake-home fallback).
@@ -112,7 +131,11 @@ pub fn finish_login(id: u64, name: &str, note: &str) -> Result<LoginOutcome, Str
         PollState::Waiting => Ok(LoginOutcome::Waiting),
         PollState::Failed { error } => Err(error),
         PollState::GotCreds { creds, home } => {
-            let res = store::save(name, &creds, &meta_from(account_of(&creds), None, note));
+            let res = (|| {
+                let u = account_of(&creds);
+                let name = pick_name(name, &u)?;
+                store::save(&name, &creds, &meta_from(u, None, note))
+            })();
             login::cleanup_home(&home);
             res.map(|profile| LoginOutcome::Done { profile })
         }
@@ -145,7 +168,8 @@ pub fn add_token(name: &str, token: &str) -> Result<ProfileInfo, String> {
     if u.email.is_empty() && u.name.is_empty() {
         return Err("token not recognized: empty user status".into());
     }
-    store::save(name, &creds, &meta_from(u, None, ""))
+    let name = pick_name(name, &u)?;
+    store::save(&name, &creds, &meta_from(u, None, ""))
 }
 
 /// Switch the CLI (and thereby Desktop) to a stored profile.
@@ -402,6 +426,18 @@ mod tests {
                 .is_active
         );
         let _ = r; // auth may be empty without a devin-signed fake home
+
+        // rename keeps the profile active (byte-compare, not name tracking)
+        store::rename("a", "a-renamed").unwrap();
+        assert!(
+            store::list()
+                .iter()
+                .find(|p| p.name == "a-renamed")
+                .unwrap()
+                .is_active
+        );
+        assert!(store::rename("a-renamed", "a-renamed").is_ok());
+        assert!(store::rename("missing", "x").is_err());
 
         // a profile with no org recorded clears the key entirely
         store::save("b", b"creds-b", &Meta::default()).unwrap();

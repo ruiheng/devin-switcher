@@ -56,6 +56,56 @@ pub fn save(name: &str, creds: &[u8], meta: &Meta) -> Result<ProfileInfo, String
     Ok(info(&name))
 }
 
+/// Rename a profile directory. Active-profile detection is byte-compare of
+/// credentials, so renaming the active profile doesn't break anything.
+pub fn rename(from: &str, to: &str) -> Result<ProfileInfo, String> {
+    let from = sanitize_name(from)?;
+    let to = sanitize_name(to)?;
+    if from == to {
+        return Ok(info(&from));
+    }
+    let src = paths::profile_dir(&from);
+    if !src.exists() {
+        return Err(format!("no such profile: {from}"));
+    }
+    let dst = paths::profile_dir(&to);
+    if dst.exists() {
+        return Err(format!("profile \"{to}\" already exists"));
+    }
+    fs::rename(&src, &dst).map_err(|e| format!("rename profile: {e}"))?;
+    Ok(info(&to))
+}
+
+/// Derive a filesystem-safe unique profile name from a hint (usually an
+/// email or display name). "a@x.com" → "a"; taken names get -2, -3, …
+pub fn unique_name(hint: &str) -> String {
+    let base: String = hint
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let mut base = base.trim_matches('-').to_string();
+    if base.is_empty() {
+        base = "account".to_string();
+    }
+    if base.len() > 60 {
+        base.truncate(60);
+    }
+    let mut cand = base.clone();
+    for i in 2.. {
+        if !paths::profile_dir(&cand).exists() {
+            return cand;
+        }
+        cand = format!("{base}-{i}");
+    }
+    unreachable!()
+}
+
 pub fn remove(name: &str) -> Result<(), String> {
     let name = sanitize_name(name)?;
     let dir = paths::profile_dir(&name);

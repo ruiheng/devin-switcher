@@ -40,13 +40,22 @@ h1 { font-size: 16px; margin: 0 0 10px; font-weight: 600; letter-spacing: .2px; 
 #currentLabel { font-weight: 600; }
 .sub { color: var(--sub); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.quota { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
-.quota .q {
-  font-size: 11px; padding: 2px 8px; border-radius: 12px;
-  background: rgba(91,108,255,.12); color: #9aa4ff;
-  border: 1px solid rgba(91,108,255,.3); white-space: nowrap;
+.quota { margin-top: 8px; }
+.qrow {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; margin-bottom: 5px;
 }
-.quota .q.dim { background: transparent; color: var(--sub); border-color: var(--border); }
+.qlab { width: 42px; flex: none; color: var(--sub); }
+.qbar {
+  flex: 0 0 90px; height: 6px; border-radius: 3px;
+  background: rgba(128,140,160,.18); overflow: hidden;
+}
+.qbar > i { display: block; height: 100%; border-radius: 3px; }
+.qbar > i.ok { background: var(--green); }
+.qbar > i.warn { background: var(--amber); }
+.qbar > i.low { background: var(--red); }
+.qval { color: var(--sub); white-space: nowrap; }
+.qfoot { font-size: 11px; color: var(--sub); margin-top: 2px; }
 
 main { padding: 14px 18px; overflow-y: auto; flex: 1; }
 

@@ -8,7 +8,6 @@ const esc = (s) =>
   );
 
 let loginId = null;
-let loginName = "";
 let loginTimer = null;
 
 function toast(msg, isErr = false) {
@@ -48,44 +47,61 @@ function renderStatus(s) {
       ? ""
       : "devin CLI not found";
   }
-  $("currentQuota").innerHTML = quotaText(s.usage);
+  $("currentQuota").innerHTML = quotaHtml(s.usage);
 }
 
-// Render a Usage object as compact quota chips: weekly/daily % left with
-// reset dates, ACU used/limit, overage balance, plan end.
-function quotaText(u) {
+// Render a Usage object as labeled progress bars. Percent fill = quota
+// remaining for daily/weekly, quota used for ACU. Green → amber → red as
+// it drains.
+function quotaHtml(u) {
   if (!u) return "";
-  const parts = [];
+  const bar = (pct) => {
+    const p = Math.max(0, Math.min(100, pct));
+    const c = p > 50 ? "ok" : p > 20 ? "warn" : "low";
+    return `<div class="qbar"><i class="${c}" style="width:${p}%"></i></div>`;
+  };
   const fmtDate = (unix) => {
     const d = new Date(unix * 1000);
     return `${d.getMonth() + 1}/${d.getDate()}`;
   };
+  const row = (label, pct, val) =>
+    `<div class="qrow"><span class="qlab">${label}</span>` +
+    `${bar(pct)}<span class="qval">${val}</span></div>`;
+  const rows = [];
   if (u.daily_left != null) {
-    parts.push(
-      `<span class="q">Daily ${u.daily_left}% left` +
-        (u.daily_reset_unix ? ` · resets ${fmtDate(u.daily_reset_unix)}` : "") +
-        `</span>`
+    rows.push(
+      row(
+        "Daily",
+        u.daily_left,
+        `${Math.round(u.daily_left)}%` +
+          (u.daily_reset_unix ? ` · resets ${fmtDate(u.daily_reset_unix)}` : "")
+      )
     );
   }
   if (u.weekly_left != null) {
-    parts.push(
-      `<span class="q">Weekly ${u.weekly_left}% left` +
-        (u.weekly_reset_unix ? ` · resets ${fmtDate(u.weekly_reset_unix)}` : "") +
-        `</span>`
+    rows.push(
+      row(
+        "Weekly",
+        u.weekly_left,
+        `${Math.round(u.weekly_left)}%` +
+          (u.weekly_reset_unix ? ` · resets ${fmtDate(u.weekly_reset_unix)}` : "")
+      )
     );
   }
   if (u.acu_limit != null && u.acu_limit > 0) {
-    parts.push(
-      `<span class="q">${r2(u.acu_used || 0)} / ${r2(u.acu_limit)} ACU</span>`
+    const used = u.acu_used || 0;
+    const leftPct = ((u.acu_limit - used) / u.acu_limit) * 100;
+    rows.push(
+      row("ACU", leftPct, `${r2(used)} / ${r2(u.acu_limit)} used`)
     );
   }
+  const foot = [];
   if (u.overage_micros != null && u.overage_micros > 0) {
-    parts.push(`<span class="q">+$${(u.overage_micros / 1e6).toFixed(2)}</span>`);
+    foot.push(`overage +$${(u.overage_micros / 1e6).toFixed(2)}`);
   }
-  if (u.plan_end) {
-    parts.push(`<span class="q dim">cycle ends ${esc(u.plan_end.slice(0, 10))}</span>`);
-  }
-  return parts.join(" ");
+  if (u.plan_end) foot.push(`plan ends ${esc(u.plan_end.slice(0, 10))}`);
+  if (foot.length) rows.push(`<div class="qfoot">${foot.join(" · ")}</div>`);
+  return rows.join("");
 }
 
 const r2 = (f) => Math.round(f * 100) / 100;
@@ -111,16 +127,18 @@ function renderProfiles(profiles) {
           .filter(Boolean)
           .join(" · ")
       )}</div>
-      ${p.usage ? `<div class="quota">${quotaText(p.usage)}</div>` : ""}
+      ${p.usage ? `<div class="quota">${quotaHtml(p.usage)}</div>` : ""}
       ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
       <div class="actions">
         <button class="use" data-act="use">Switch</button>
         <button data-act="par">Run in parallel</button>
+        <button data-act="ren" title="Rename profile">Rename</button>
         <button data-act="ref" title="Refresh quota">↻</button>
         <button class="danger" data-act="del">Delete</button>
       </div>`;
     card.querySelector('[data-act="use"]').onclick = () => useProfile(p.name);
     card.querySelector('[data-act="par"]').onclick = () => parallel(p.name);
+    card.querySelector('[data-act="ren"]').onclick = () => rename(p.name);
     card.querySelector('[data-act="ref"]').onclick = () => refreshUsage(p.name);
     card.querySelector('[data-act="del"]').onclick = () => del(p.name);
     el.appendChild(card);
@@ -159,6 +177,17 @@ async function parallel(name) {
     } else {
       toast("Run this in a terminal: " + r.command);
     }
+  } catch (e) {
+    toast(String(e), true);
+  }
+}
+
+async function rename(name) {
+  const to = prompt("Rename profile", name);
+  if (to == null || to.trim() === "" || to.trim() === name) return;
+  try {
+    await invoke("rename_profile", { from: name, to: to.trim() });
+    refresh();
   } catch (e) {
     toast(String(e), true);
   }
@@ -206,11 +235,9 @@ for (const t of document.querySelectorAll(".tab")) {
 }
 
 $("saveCurrent").onclick = async () => {
-  const name = $("currentName").value.trim();
-  if (!name) return toast("Pick a profile name", true);
   try {
-    await invoke("save_current", { name, note: "" });
-    toast("Saved");
+    const p = await invoke("save_current", { name: "", note: "" });
+    toast("Saved as " + p.name);
     closeSheet();
     refresh();
   } catch (e) {
@@ -219,11 +246,10 @@ $("saveCurrent").onclick = async () => {
 };
 
 $("saveToken").onclick = async () => {
-  const name = $("tokenName").value.trim();
   const token = $("tokenValue").value.trim();
-  if (!name || !token) return toast("Name and token required", true);
+  if (!token) return toast("Token required", true);
   try {
-    const p = await invoke("add_token", { name, token });
+    const p = await invoke("add_token", { name: "", token });
     toast("Saved " + (p.email || p.name));
     closeSheet();
     refresh();
@@ -233,12 +259,9 @@ $("saveToken").onclick = async () => {
 };
 
 $("startLogin").onclick = async () => {
-  const name = $("loginName").value.trim();
-  if (!name) return toast("Pick a profile name", true);
   try {
     const offer = await invoke("start_login");
     loginId = offer.id;
-    loginName = name;
     $("loginUrl").value = offer.url;
     $("loginHint").textContent = offer.hint;
     $("startLogin").classList.add("hidden");
@@ -278,11 +301,7 @@ function stopLogin() {
 async function pollLogin() {
   if (loginId == null) return;
   try {
-    const r = await invoke("poll_login", {
-      id: loginId,
-      name: loginName || $("loginName").value.trim() || "account",
-      note: "",
-    });
+    const r = await invoke("poll_login", { id: loginId, name: "", note: "" });
     if (r.kind === "done") {
       toast("Signed in as " + (r.profile.email || r.profile.name));
       stopLogin();
