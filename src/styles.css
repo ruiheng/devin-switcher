@@ -121,8 +121,17 @@ button.primary, button.use { background: var(--accent); border-color: var(--acce
 button.primary:hover, button.use:hover { background: var(--accent2); border-color: var(--accent2); }
 button.danger { color: #ff8a80; }
 button.danger:hover { border-color: var(--red); }
+button.danger.armed {
+  background: var(--red); border-color: var(--red); color: #fff;
+}
 button.ghost { background: transparent; }
 button:disabled { opacity: .5; cursor: default; }
+
+/* pending state — set by pend() while an action is in flight */
+.busy { opacity: .55; pointer-events: none; }
+button.busy { cursor: progress; }
+.icobtn.busy { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .add {
   width: 100%; margin-top: 12px; padding: 10px;

@@ -51,6 +51,7 @@ const I18N = {
     renHint: "double-click to rename",
     swRef: "Refresh quota",
     swDel: "Delete",
+    switching: (n) => `Switching to ${n}…`,
     active: "ACTIVE",
     daily: "Daily",
     weekly: "Weekly",
@@ -68,8 +69,7 @@ const I18N = {
     runThis: (c) => `Run this in a terminal: ${c}`,
     linkCopied: "Link copied — open it in any browser or incognito window",
     tokenReq: "Token required",
-    delConfirm: (n) =>
-      `Delete account "${n}"? Its saved credentials are removed.`,
+    delSure: "Confirm delete",
   },
   zh: {
     currentTag: "当前登录",
@@ -110,6 +110,7 @@ const I18N = {
     renHint: "双击改名",
     swRef: "刷新额度",
     swDel: "删除",
+    switching: (n) => `正在切换到 ${n}…`,
     active: "使用中",
     daily: "当天",
     weekly: "本周",
@@ -126,7 +127,7 @@ const I18N = {
     runThis: (c) => `在终端中运行：${c}`,
     linkCopied: "链接已复制——可在任何浏览器或隐身窗口打开",
     tokenReq: "需要 token",
-    delConfirm: (n) => `删除账号「${n}」？保存的凭据将被移除。`,
+    delSure: "确认删除",
   },
 };
 
@@ -182,16 +183,28 @@ function toast(msg, isErr = false) {
   }
 }
 
-async function refresh() {
+async function refresh(force = false) {
   try {
     const [status, profiles] = await Promise.all([
       invoke("get_status"),
       invoke("list_profiles"),
     ]);
     renderStatus(status);
-    renderProfiles(profiles, status);
+    renderProfiles(profiles, status, force);
   } catch (e) {
     toast(String(e), true);
+  }
+}
+
+// Instant click feedback: el dims and stops taking input while fn runs.
+// .busy also shields the card from the 5s poll's re-render.
+async function pend(el, fn) {
+  if (el?.classList.contains("busy")) return;
+  el?.classList.add("busy");
+  try {
+    return await fn();
+  } finally {
+    el?.classList.remove("busy");
   }
 }
 
@@ -277,7 +290,7 @@ function quotaHtml(u) {
 
 const r2 = (f) => Math.round(f * 100) / 100;
 
-function renderProfiles(profiles, status) {
+function renderProfiles(profiles, status, force = false) {
   const el = $("profiles");
   // The banner only earns its space when the live sign-in is NOT a saved
   // profile (signed out, or an unsaved account). When it matches a card,
@@ -286,8 +299,10 @@ function renderProfiles(profiles, status) {
   signedIn = !!status?.auth?.logged_in;
   activeSaved = !!active;
   $("current").classList.toggle("hidden", !!active);
-  // Don't clobber an in-progress inline rename on the 5s poll.
-  if (el.querySelector(".rename-in")) return;
+  // Don't clobber an in-progress rename, armed delete, or busy card on
+  // the 5s poll — an action's own refresh passes force to bypass this.
+  if (!force && el.querySelector(".rename-in, .danger.armed, .busy"))
+    return;
   if (!profiles.length) {
     el.innerHTML = `<p class="sub empty">${t(
       signedIn ? "noProfilesSignedIn" : "noProfiles"
@@ -297,7 +312,7 @@ function renderProfiles(profiles, status) {
       b.className = "primary";
       b.style.alignSelf = "center";
       b.textContent = t("saveCurrent");
-      b.onclick = saveCurrent;
+      b.onclick = (e) => pend(e.currentTarget, saveCurrent);
       el.appendChild(b);
     }
     return;
@@ -328,11 +343,14 @@ function renderProfiles(profiles, status) {
         <button class="danger" data-act="del">${t("swDel")}</button>
       </div>`;
     const useBtn = card.querySelector('[data-act="use"]');
-    if (useBtn) useBtn.onclick = () => useProfile(p.name);
+    if (useBtn)
+      useBtn.onclick = () => pend(card, () => useProfile(p.name));
     const parBtn = card.querySelector('[data-act="par"]');
-    if (parBtn) parBtn.onclick = () => parallel(p.name);
-    card.querySelector('[data-act="ref"]').onclick = () => refreshUsage(p.name);
-    card.querySelector('[data-act="del"]').onclick = () => del(p.name);
+    if (parBtn) parBtn.onclick = () => pend(parBtn, () => parallel(p.name));
+    card.querySelector('[data-act="ref"]').onclick = (e) =>
+      pend(e.currentTarget, () => refreshUsage(p.name));
+    card.querySelector('[data-act="del"]').onclick = (e) =>
+      armDelete(e.currentTarget, p.name);
     card.querySelector(".name").ondblclick = (e) => {
       e.stopPropagation();
       inlineRename(e.currentTarget, p.name);
@@ -340,7 +358,7 @@ function renderProfiles(profiles, status) {
     if (!p.is_active) {
       card.ondblclick = (e) => {
         if (e.target.closest("button, input")) return;
-        useProfile(p.name);
+        pend(card, () => useProfile(p.name));
       };
     }
     el.appendChild(card);
@@ -348,11 +366,12 @@ function renderProfiles(profiles, status) {
 }
 
 async function useProfile(name) {
+  // Immediate feedback — the backend still does a quota fetch, so the
+  // switch itself isn't instant even without the devin CLI spawn.
+  toast(t("switching", name));
   try {
     const r = await invoke("use_profile", { name });
-    const who = r.auth.logged_in
-      ? r.auth.name || r.auth.email || "account"
-      : "account";
+    const who = name;
     const warn = $("warnBanner");
     if (r.restart_needed && r.restart_needed.length) {
       warn.textContent = t("restartWarn", who, r.restart_needed.join(", "));
@@ -361,7 +380,7 @@ async function useProfile(name) {
       warn.classList.add("hidden");
     }
     toast(t("switchedTo", who));
-    refresh();
+    refresh(true);
   } catch (e) {
     toast(String(e), true);
   }
@@ -401,7 +420,7 @@ function inlineRename(nameEl, old) {
         toast(String(e), true);
       }
     }
-    refresh();
+    refresh(true);
   };
   input.onkeydown = (e) => {
     if (e.key === "Enter") finish(true);
@@ -413,17 +432,34 @@ function inlineRename(nameEl, old) {
 async function refreshUsage(name) {
   try {
     await invoke("refresh_usage", { name });
-    refresh();
+    refresh(true);
   } catch (e) {
     toast(String(e), true);
   }
 }
 
+// Two-step delete — WebView2's native confirm() shows "tauri.localhost"
+// as the origin, so the button itself arms for 3s instead.
+function armDelete(btn, name) {
+  if (btn.dataset.armed) {
+    pend(btn.closest(".profile"), () => del(name));
+    return;
+  }
+  btn.dataset.armed = "1";
+  const label = btn.textContent;
+  btn.textContent = t("delSure");
+  btn.classList.add("armed");
+  setTimeout(() => {
+    delete btn.dataset.armed;
+    btn.classList.remove("armed");
+    btn.textContent = label;
+  }, 3000);
+}
+
 async function del(name) {
-  if (!confirm(t("delConfirm", name))) return;
   try {
     await invoke("delete_profile", { name });
-    refresh();
+    refresh(true);
   } catch (e) {
     toast(String(e), true);
   }
@@ -464,22 +500,23 @@ async function saveCurrent() {
     const p = await invoke("save_current", { name: "", note: "" });
     toast(t("savedAs", p.name));
     closeSheet();
-    refresh();
+    refresh(true);
   } catch (e) {
     toast(String(e), true);
   }
 }
 
-$("saveCurrent").onclick = saveCurrent;
+$("saveCurrent").onclick = (e) => pend(e.currentTarget, saveCurrent);
 
-$("tokenLink").onclick = async () => {
-  try {
-    $("tokenUrl").value = await invoke("manual_start");
-    $("tokenLinkRow").classList.remove("hidden");
-  } catch (e) {
-    toast(String(e), true);
-  }
-};
+$("tokenLink").onclick = (e) =>
+  pend(e.currentTarget, async () => {
+    try {
+      $("tokenUrl").value = await invoke("manual_start");
+      $("tokenLinkRow").classList.remove("hidden");
+    } catch (err) {
+      toast(String(err), true);
+    }
+  });
 
 $("openTokenUrl").onclick = () => {
   const url = $("tokenUrl").value;
@@ -495,32 +532,34 @@ $("copyTokenUrl").onclick = async () => {
   }
 };
 
-$("saveToken").onclick = async () => {
-  const code = $("tokenValue").value.trim();
-  if (!code) return toast(t("tokenReq"), true);
-  try {
-    const p = await invoke("manual_finish", { name: "", code });
-    toast(t("savedTok", p.email || p.name));
-    closeSheet();
-    refresh();
-  } catch (e) {
-    toast(String(e), true);
-  }
-};
+$("saveToken").onclick = (e) =>
+  pend(e.currentTarget, async () => {
+    const code = $("tokenValue").value.trim();
+    if (!code) return toast(t("tokenReq"), true);
+    try {
+      const p = await invoke("manual_finish", { name: "", code });
+      toast(t("savedTok", p.email || p.name));
+      closeSheet();
+      refresh(true);
+    } catch (err) {
+      toast(String(err), true);
+    }
+  });
 
-$("startLogin").onclick = async () => {
-  try {
-    const offer = await invoke("start_login");
-    loginId = offer.id;
-    $("loginUrl").value = offer.url;
-    $("loginHint").textContent = offer.hint;
-    $("startLogin").classList.add("hidden");
-    $("loginWait").classList.remove("hidden");
-    loginTimer = setInterval(pollLogin, 600);
-  } catch (e) {
-    toast(String(e), true);
-  }
-};
+$("startLogin").onclick = (e) =>
+  pend(e.currentTarget, async () => {
+    try {
+      const offer = await invoke("start_login");
+      loginId = offer.id;
+      $("loginUrl").value = offer.url;
+      $("loginHint").textContent = offer.hint;
+      $("startLogin").classList.add("hidden");
+      $("loginWait").classList.remove("hidden");
+      loginTimer = setInterval(pollLogin, 600);
+    } catch (err) {
+      toast(String(err), true);
+    }
+  });
 
 $("openUrl").onclick = () => {
   const url = $("loginUrl").value;
@@ -556,7 +595,7 @@ async function pollLogin() {
       toast(t("signedInAs", r.profile.email || r.profile.name));
       stopLogin();
       closeSheet();
-      refresh();
+      refresh(true);
     } else if (r.kind === "working") {
       document.querySelector("#loginWait .wait-text").textContent =
         t("finishing");
