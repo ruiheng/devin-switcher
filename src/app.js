@@ -27,6 +27,7 @@ const I18N = {
       "The account is named after its email — rename it from the card afterwards.",
     startLogin: "Start sign-in",
     waiting: "Waiting for sign-in…",
+    finishing: "Callback received — finishing sign-in…",
     copy: "Copy",
     open: "Open",
     terminalInstead: "Or run in a terminal instead",
@@ -86,6 +87,7 @@ const I18N = {
     loginName: "账号会按邮箱自动命名，之后可在卡片上改名。",
     startLogin: "开始登录",
     waiting: "等待登录…",
+    finishing: "已收到回调——正在完成登录…",
     copy: "复制",
     open: "打开",
     terminalInstead: "或者在终端里运行",
@@ -167,7 +169,17 @@ function toast(msg, isErr = false) {
   t2.textContent = msg;
   t2.className = "toast" + (isErr ? " err" : "");
   clearTimeout(t2._h);
-  t2._h = setTimeout(() => t2.classList.add("hidden"), 4000);
+  t2.onclick = null;
+  // Errors stay until dismissed via ✕ — 4s is too short to read a failure.
+  if (!isErr) {
+    t2._h = setTimeout(() => t2.classList.add("hidden"), 4000);
+  } else {
+    const x = document.createElement("button");
+    x.className = "tx";
+    x.textContent = "✕";
+    x.onclick = () => t2.classList.add("hidden");
+    t2.appendChild(x);
+  }
 }
 
 async function refresh() {
@@ -504,7 +516,7 @@ $("startLogin").onclick = async () => {
     $("loginHint").textContent = offer.hint;
     $("startLogin").classList.add("hidden");
     $("loginWait").classList.remove("hidden");
-    loginTimer = setInterval(pollLogin, 1200);
+    loginTimer = setInterval(pollLogin, 600);
   } catch (e) {
     toast(String(e), true);
   }
@@ -545,6 +557,9 @@ async function pollLogin() {
       stopLogin();
       closeSheet();
       refresh();
+    } else if (r.kind === "working") {
+      document.querySelector("#loginWait .wait-text").textContent =
+        t("finishing");
     }
     // "waiting" → keep polling
   } catch (e) {

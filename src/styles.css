@@ -175,6 +175,10 @@ details.manual code {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
   background: var(--card2); border: 1px solid var(--border);
   border-radius: 8px; padding: 9px 16px; font-size: 13px; z-index: 20;
-  max-width: 90vw;
+  max-width: 90vw; user-select: text; cursor: default;
 }
 .toast.err { border-color: rgba(248,81,73,.5); color: #ff9d95; }
+.toast .tx {
+  border: none; background: none; color: inherit;
+  padding: 0 0 0 10px; font-size: 12px;
+}
