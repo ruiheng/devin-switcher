@@ -295,7 +295,25 @@ pub fn use_profile(name: &str) -> Result<UseResult, String> {
 
     config::apply_org_id(org.as_deref())?;
 
-    let auth = devincli::auth_status(None).unwrap_or_default();
+    // The account we just wrote IS the live sign-in — report it from the
+    // fresh fetch (or stored meta) instead of spawning `devin auth
+    // status`, which costs seconds on Windows.
+    let auth = AuthStatus {
+        logged_in: true,
+        name: u
+            .as_ref()
+            .map(|x| x.name.clone())
+            .unwrap_or_else(|| meta.display_name.clone()),
+        email: u
+            .as_ref()
+            .map(|x| x.email.clone())
+            .unwrap_or_else(|| meta.email.clone()),
+        plan: u
+            .as_ref()
+            .map(|x| x.plan.clone())
+            .unwrap_or_else(|| meta.plan.clone()),
+        ..Default::default()
+    };
     // Refresh the stored meta from whatever we just learned.
     if let Some(u) = u {
         if !u.email.is_empty() || !u.plan.is_empty() {
