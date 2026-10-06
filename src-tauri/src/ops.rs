@@ -201,11 +201,22 @@ pub fn save_current(name: &str, note: &str) -> Result<ProfileInfo, String> {
 
 /// Finish a login round (PKCE callback or CLI-in-fake-home fallback).
 pub fn finish_login(id: u64, name: &str, note: &str) -> Result<LoginOutcome, String> {
-    match login::poll(id)? {
+    let st = login::poll(id).map_err(|e| {
+        eprintln!("[dsw] login poll error: {e}");
+        e
+    })?;
+    match st {
         PollState::Waiting => Ok(LoginOutcome::Waiting),
-        PollState::Failed { error } => Err(error),
+        PollState::Working => Ok(LoginOutcome::Working),
+        PollState::Failed { error } => {
+            eprintln!("[dsw] login failed: {error}");
+            Err(error)
+        }
         PollState::GotCreds { creds, home } => {
             let res = save_account(&creds, account_of(&creds), None, name, note);
+            if let Err(e) = &res {
+                eprintln!("[dsw] save after login failed: {e}");
+            }
             login::cleanup_home(&home);
             res.map(|profile| LoginOutcome::Done { profile })
         }
@@ -216,6 +227,8 @@ pub fn finish_login(id: u64, name: &str, note: &str) -> Result<LoginOutcome, Str
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LoginOutcome {
     Waiting,
+    /// Callback landed; token exchange / account fetch still running.
+    Working,
     Done { profile: ProfileInfo },
 }
 

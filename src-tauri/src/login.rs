@@ -39,15 +39,18 @@ pub struct LoginOffer {
     pub hint: String,
 }
 
-/// What a poll found: still waiting, credentials acquired (caller finishes
-/// the profile), or failed.
+/// What a poll found: still waiting, callback received + exchange in
+/// flight, credentials acquired (caller finishes the account), or failed.
 pub enum PollState {
     Waiting,
+    Working,
     GotCreds { creds: Vec<u8>, home: PathBuf },
     Failed { error: String },
 }
 
 enum Outcome {
+    /// Browser callback arrived; the token exchange is running.
+    Exchanging,
     Credentials(Vec<u8>),
     Failed(String),
 }
@@ -56,6 +59,8 @@ struct Session {
     home: PathBuf,
     created: Instant,
     rx: mpsc::Receiver<Outcome>,
+    /// The browser callback landed — polls report Working from here on.
+    working: bool,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -132,7 +137,9 @@ fn read_request_line(stream: &TcpStream) -> Result<String, String> {
 fn query_param(target: &str, key: &str) -> Option<String> {
     let q = target.split('?').nth(1)?.split('#').next()?;
     for pair in q.split('&') {
-        let (k, v) = pair.split_once('=')?;
+        let Some((k, v)) = pair.split_once('=') else {
+            continue;
+        };
         if k == key {
             return Some(urldecode(v));
         }
@@ -159,6 +166,10 @@ fn urldecode(s: &str) -> String {
 }
 
 const DONE_PAGE: &str = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><title>Devin Switch</title><body style=\"font-family:sans-serif;display:grid;place-items:center;min-height:80vh\"><div><h2>Sign-in complete</h2><p>You can close this tab and return to Devin Switch.</p></div>";
+
+const ERR_PAGE: &str = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><title>Devin Switch</title><body style=\"font-family:sans-serif;display:grid;place-items:center;min-height:80vh\"><div><h2>Sign-in failed</h2><p>Devin Switch didn't recognize this callback — go back and try again.</p></div>";
+
+const NOT_FOUND: &str = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
 /// Begin a login round: fake home + PKCE URL + callback listener thread.
 pub fn start() -> Result<LoginOffer, String> {
@@ -188,8 +199,10 @@ pub fn start() -> Result<LoginOffer, String> {
         let state = state.clone();
         let redirect = redirect.clone();
         std::thread::spawn(move || {
-            let outcome = wait_callback(listener, &state, LOGIN_TIMEOUT)
-                .and_then(|code| exchange(&code, &verifier, &redirect));
+            let outcome = wait_callback(listener, &state, LOGIN_TIMEOUT).and_then(|code| {
+                let _ = tx.send(Outcome::Exchanging);
+                exchange(&code, &verifier, &redirect)
+            });
             let _ = tx.send(match outcome {
                 Ok(creds) => Outcome::Credentials(creds),
                 Err(e) => Outcome::Failed(e),
@@ -203,6 +216,7 @@ pub fn start() -> Result<LoginOffer, String> {
             home: home.clone(),
             created: Instant::now(),
             rx,
+            working: false,
         },
     );
 
@@ -247,26 +261,43 @@ pub fn manual_finish(m: &ManualLogin, code: &str) -> Result<Vec<u8>, String> {
     exchange(code, &m.verifier, "")
 }
 
+/// What one accepted connection turned out to be.
+enum Conn {
+    /// Our callback with a code — done.
+    Code(String),
+    /// Our callback but broken (bad state, no code) — terminal failure.
+    Fatal(String),
+    /// Anything else: favicon requests, speculative sockets that never send
+    /// a request line. Answered 404 or dropped; the listener stays up.
+    Stray,
+}
+
 fn wait_callback(
     listener: TcpListener,
     want_state: &str,
     timeout: Duration,
 ) -> Result<String, String> {
-    listener.set_nonblocking(false).ok();
-    // Accept with a deadline: poll via incoming() is blocking, so use a
-    // short read timeout loop instead.
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let deadline = Instant::now() + timeout;
     loop {
+        if Instant::now() > deadline {
+            return Err("login timed out (10 min)".into());
+        }
         match listener.accept() {
             Ok((mut stream, _)) => {
+                // Windows inherits the listener's nonblocking mode on
+                // accepted sockets (unix doesn't), and read timeouts are
+                // ignored on nonblocking sockets — force blocking or every
+                // read can fail instantly with WSAEWOULDBLOCK (10035).
+                stream.set_nonblocking(false).ok();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
-                return handle_conn(&mut stream, want_state);
+                match handle_conn(&mut stream, want_state) {
+                    Conn::Code(code) => return Ok(code),
+                    Conn::Fatal(e) => return Err(e),
+                    Conn::Stray => continue,
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if Instant::now() > deadline {
-                    return Err("login timed out (10 min)".into());
-                }
                 std::thread::sleep(Duration::from_millis(100));
             }
             Err(e) => return Err(format!("callback listener: {e}")),
@@ -274,25 +305,39 @@ fn wait_callback(
     }
 }
 
-fn handle_conn(stream: &mut TcpStream, want_state: &str) -> Result<String, String> {
-    let line = read_request_line(stream)?;
+fn handle_conn(stream: &mut TcpStream, want_state: &str) -> Conn {
+    let Ok(line) = read_request_line(stream) else {
+        return Conn::Stray;
+    };
     // drain remaining headers best-effort
     let mut sink = [0u8; 512];
     let _ = stream.read(&mut sink);
-    let target = line
-        .split_whitespace()
-        .nth(1)
-        .ok_or("malformed callback request")?
-        .to_string();
-    let code = query_param(&target, "code");
-    let state = query_param(&target, "state");
-    let _ = stream.write_all(DONE_PAGE.as_bytes());
-    let _ = stream.flush();
-    if state.as_deref() != Some(want_state) {
-        return Err("callback state mismatch".into());
+    let Some(target) = line.split_whitespace().nth(1) else {
+        return Conn::Stray;
+    };
+    if !target.starts_with("/callback") {
+        let _ = stream.write_all(NOT_FOUND.as_bytes());
+        return Conn::Stray;
     }
-    code.filter(|c| !c.is_empty())
-        .ok_or_else(|| "callback carried no code".into())
+    let code = query_param(target, "code");
+    let state = query_param(target, "state");
+    if state.as_deref() != Some(want_state) {
+        let _ = stream.write_all(ERR_PAGE.as_bytes());
+        let _ = stream.flush();
+        return Conn::Fatal("callback state mismatch".into());
+    }
+    match code.filter(|c| !c.is_empty()) {
+        Some(code) => {
+            let _ = stream.write_all(DONE_PAGE.as_bytes());
+            let _ = stream.flush();
+            Conn::Code(code)
+        }
+        None => {
+            let _ = stream.write_all(ERR_PAGE.as_bytes());
+            let _ = stream.flush();
+            Conn::Fatal("callback carried no code".into())
+        }
+    }
 }
 
 /// Poll a login round. On `GotCreds` the caller writes them into the fake
@@ -300,7 +345,7 @@ fn handle_conn(stream: &mut TcpStream, want_state: &str) -> Result<String, Strin
 pub fn poll(id: u64) -> Result<PollState, String> {
     let mut guard = sessions();
     let map = guard.get_or_insert_with(HashMap::new);
-    let Some(sess) = map.get(&id) else {
+    let Some(sess) = map.get_mut(&id) else {
         return Err("no such login session".into());
     };
 
@@ -315,24 +360,38 @@ pub fn poll(id: u64) -> Result<PollState, String> {
         }
     }
 
-    match sess.rx.try_recv() {
-        Ok(Outcome::Credentials(creds)) => {
+    // Drain progress + the terminal outcome if one arrived.
+    let mut terminal = None;
+    loop {
+        match sess.rx.try_recv() {
+            Ok(Outcome::Exchanging) => sess.working = true,
+            Ok(o) => {
+                terminal = Some(o);
+                break;
+            }
+            Err(mpsc::TryRecvError::Empty) => break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                terminal = Some(Outcome::Failed("login listener stopped".into()));
+                break;
+            }
+        }
+    }
+
+    match terminal {
+        Some(Outcome::Credentials(creds)) => {
             let home = sess.home.clone();
             map.remove(&id);
             Ok(PollState::GotCreds { creds, home })
         }
-        Ok(Outcome::Failed(error)) => {
+        Some(Outcome::Failed(error)) => {
             map.remove(&id);
             Ok(PollState::Failed { error })
         }
-        Err(mpsc::TryRecvError::Disconnected) => {
-            map.remove(&id);
-            Ok(PollState::Failed {
-                error: "login listener stopped".into(),
-            })
-        }
-        Err(mpsc::TryRecvError::Empty) => {
-            if sess.created.elapsed() > LOGIN_TIMEOUT {
+        Some(Outcome::Exchanging) => Ok(PollState::Working),
+        None => {
+            if sess.working {
+                Ok(PollState::Working)
+            } else if sess.created.elapsed() > LOGIN_TIMEOUT {
                 map.remove(&id);
                 Ok(PollState::Failed {
                     error: "login timed out".into(),
