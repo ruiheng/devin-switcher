@@ -37,6 +37,10 @@ h1 { font-size: 16px; margin: 0 0 10px; font-weight: 600; letter-spacing: .2px; 
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--sub); flex: none; }
 .dot.on { background: var(--green); }
 .current-text { min-width: 0; }
+.curtag {
+  font-size: 10px; letter-spacing: .08em; color: var(--sub);
+  margin-bottom: 2px;
+}
 #currentLabel { font-weight: 600; }
 .sub { color: var(--sub); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

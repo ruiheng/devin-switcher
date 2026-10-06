@@ -108,6 +108,11 @@ const r2 = (f) => Math.round(f * 100) / 100;
 
 function renderProfiles(profiles) {
   const el = $("profiles");
+  // Tell the banner which saved profile the live sign-in matches.
+  const active = profiles.find((p) => p.is_active);
+  $("currentTag").textContent = active
+    ? `CURRENT SIGN-IN · ${active.name}`
+    : "CURRENT SIGN-IN";
   if (!profiles.length) {
     el.innerHTML =
       '<p class="sub" style="text-align:center;margin:24px 0">No profiles yet.<br>Add your first account below.</p>';
