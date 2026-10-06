@@ -52,6 +52,9 @@ header { position: relative; }
 #currentLabel { font-weight: 600; }
 .sub { color: var(--sub); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.quota-wrap { display: flex; align-items: flex-start; gap: 4px; margin-top: 8px; }
+.quota-wrap .quota { flex: 1; min-width: 0; margin-top: 0; }
+.quota-wrap .icobtn { margin-left: 0; }
 .quota { margin-top: 8px; }
 .qrow {
   display: flex; align-items: center; gap: 8px;

@@ -70,6 +70,7 @@ const I18N = {
     linkCopied: "Link copied — open it in any browser or incognito window",
     tokenReq: "Token required",
     delSure: "Confirm delete",
+    delSureLive: "Snapshot only — stays signed in",
   },
   zh: {
     currentTag: "当前登录",
@@ -128,6 +129,7 @@ const I18N = {
     linkCopied: "链接已复制——可在任何浏览器或隐身窗口打开",
     tokenReq: "需要 token",
     delSure: "确认删除",
+    delSureLive: "仅删快照·保持登录",
   },
 };
 
@@ -329,19 +331,23 @@ function renderProfiles(profiles, status, force = false) {
       <div class="top">
         <span class="name" title="${esc(t("renHint"))}">${esc(p.name)}</span>
         ${p.is_active ? `<span class="badge">${t("active")}</span>` : ""}
-        <button class="icobtn" data-act="ref" title="${t("swRef")}">↻</button>
+        <button class="icobtn danger" data-act="del" title="${t("swDel")}">✕</button>
       </div>
       <div class="meta">${esc(
         [p.email || p.display_name || t("unknown"), p.plan]
           .filter(Boolean)
           .join(" · ")
       )}</div>
-      ${p.usage ? `<div class="quota">${quotaHtml(p.usage)}</div>` : ""}
+      <div class="quota-wrap">
+        <div class="quota">${p.usage ? quotaHtml(p.usage) : ""}</div>
+        <button class="icobtn" data-act="ref" title="${t("swRef")}">↻</button>
+      </div>
       ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
-      <div class="actions">
-        ${p.is_active ? "" : `<button class="use" data-act="use">${t("swUse")}</button><button data-act="par">${t("swPar")}</button>`}
-        <button class="danger" data-act="del">${t("swDel")}</button>
-      </div>`;
+      ${
+        p.is_active
+          ? ""
+          : `<div class="actions"><button class="use" data-act="use">${t("swUse")}</button><button data-act="par">${t("swPar")}</button></div>`
+      }`;
     const useBtn = card.querySelector('[data-act="use"]');
     if (useBtn)
       useBtn.onclick = () => pend(card, () => useProfile(p.name));
@@ -350,7 +356,7 @@ function renderProfiles(profiles, status, force = false) {
     card.querySelector('[data-act="ref"]').onclick = (e) =>
       pend(e.currentTarget, () => refreshUsage(p.name));
     card.querySelector('[data-act="del"]').onclick = (e) =>
-      armDelete(e.currentTarget, p.name);
+      armDelete(e.currentTarget, p.name, p.is_active);
     card.querySelector(".name").ondblclick = (e) => {
       e.stopPropagation();
       inlineRename(e.currentTarget, p.name);
@@ -440,14 +446,14 @@ async function refreshUsage(name) {
 
 // Two-step delete — WebView2's native confirm() shows "tauri.localhost"
 // as the origin, so the button itself arms for 3s instead.
-function armDelete(btn, name) {
+function armDelete(btn, name, isActive) {
   if (btn.dataset.armed) {
     pend(btn.closest(".profile"), () => del(name));
     return;
   }
   btn.dataset.armed = "1";
   const label = btn.textContent;
-  btn.textContent = t("delSure");
+  btn.textContent = t(isActive ? "delSureLive" : "delSure");
   btn.classList.add("armed");
   setTimeout(() => {
     delete btn.dataset.armed;
