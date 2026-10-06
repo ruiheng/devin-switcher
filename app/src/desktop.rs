@@ -146,6 +146,75 @@ fn patch_json(
     );
 }
 
+/// What Desktop is currently signed in as — the first entry of the
+/// decrypted sessions secret. Read-only; safe while Desktop runs.
+pub struct DesktopSession {
+    pub token: String,
+    pub label: String,
+    pub user_id: String,
+}
+
+pub fn current_session() -> Result<DesktopSession, String> {
+    let db = db_path().ok_or("Devin Desktop data dir not found")?;
+    let key = vault_key()?;
+    let conn = rusqlite::Connection::open_with_flags(
+        &db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|e| format!("open state.vscdb: {e}"))?;
+    let raw: String = conn
+        .query_row(
+            "SELECT value FROM ItemTable WHERE key=?1",
+            [SESSIONS_KEY],
+            |r| r.get(0),
+        )
+        .map_err(|_| "no Desktop session stored".to_string())?;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("sessions row unreadable: {e}"))?;
+    let bytes: Vec<u8> = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect())
+        .ok_or("sessions row isn't a Buffer")?;
+    let pt = open(&key, &bytes)?;
+    let arr: Vec<serde_json::Value> =
+        serde_json::from_slice(&pt).map_err(|e| format!("sessions JSON bad: {e}"))?;
+    let s = arr.first().ok_or("Desktop has no session")?;
+    Ok(DesktopSession {
+        token: s
+            .get("accessToken")
+            .and_then(|t| t.as_str())
+            .ok_or("session has no accessToken")?
+            .to_string(),
+        label: s
+            .pointer("/account/label")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string(),
+        user_id: s
+            .pointer("/account/id")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string(),
+    })
+}
+
+/// Reverse of `seal`: strip `v10`, AES-256-GCM open.
+fn open(key: &[u8; 32], bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce};
+
+    let body = bytes
+        .strip_prefix(b"v10")
+        .ok_or("secret isn't a v10 blob")?;
+    if body.len() < 12 + 16 {
+        return Err("secret blob too short".into());
+    }
+    Aes256Gcm::new(key.into())
+        .decrypt(Nonce::from_slice(&body[..12]), &body[12..])
+        .map_err(|e| format!("secret won't decrypt: {e}"))
+}
+
 /// `v10` + AES-256-GCM(nonce, plaintext), nonce freshly random.
 fn seal(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, String> {
     use aes_gcm::aead::{Aead, KeyInit, OsRng};

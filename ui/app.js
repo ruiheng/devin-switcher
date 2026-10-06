@@ -21,6 +21,12 @@ const I18N = {
     tabLogin: "Browser sign-in",
     tabCurrent: "Save current",
     tabToken: "Paste token",
+    tabDesktop: "Desktop import",
+    desktopHint:
+      "Import the account Devin Desktop is signed in as — reads its stored session; Desktop can stay open.",
+    importDesktop: "Import Desktop sign-in",
+    importing: "Reading Devin Desktop's sign-in…",
+    saving: "Saving…",
     loginHint:
       "Sign in via your browser — it uses the devin account already signed in there, if any.",
     loginName:
@@ -43,6 +49,7 @@ const I18N = {
       "Get a sign-in link, open it in any browser — the page shows a code after sign-in. Paste the code (or a devin-session-token$…) below.",
     getLink: "Get sign-in link",
     codeOrToken: "Code or token",
+    codeOrTokenPh: "code or devin-session-token$…",
     saveToken: "Save",
     savedAccounts: "SAVED ACCOUNTS",
     noProfiles: "No saved accounts yet.<br>Use + Add account above.",
@@ -101,7 +108,13 @@ const I18N = {
     addTitle: "添加账号",
     tabLogin: "浏览器登录",
     tabCurrent: "保存当前",
-    tabToken: "粘贴 token",
+    tabToken: "粘贴令牌",
+    tabDesktop: "桌面端导入",
+    desktopHint:
+      "导入 Devin 桌面端当前登录的账号——直接读取它存的会话，桌面端不用退出。",
+    importDesktop: "导入桌面端登录",
+    importing: "正在读取桌面端登录…",
+    saving: "正在保存…",
     loginHint:
       "在浏览器中完成登录——会使用浏览器里已登录的 devin 账号（如已登录）。",
     loginName: "账号会按邮箱自动命名，之后可在卡片上改名。",
@@ -119,9 +132,10 @@ const I18N = {
       "保存 devin CLI 当前登录的账号。账号会按邮箱自动命名。",
     saveCurrent: "保存当前登录",
     tokenHint:
-      "生成登录链接，在任何浏览器打开——登录后页面会显示一个 code。把 code（或 devin-session-token$…）粘贴到下面。",
+      "生成登录链接，在任何浏览器打开——登录后页面会显示一个 code。把 code（或 devin-session-token$… 开头的串）粘贴到下面。",
     getLink: "生成登录链接",
-    codeOrToken: "Code 或 token",
+    codeOrToken: "Code 或令牌",
+    codeOrTokenPh: "code 或 devin-session-token$…",
     saveToken: "保存",
     savedAccounts: "已保存的账号",
     noProfiles: "还没有保存的账号。<br>点上方「+ 添加账号」。",
@@ -149,20 +163,20 @@ const I18N = {
     signedInAs: (n) => `已登录 ${n}`,
     switchedTo: (w) => `已切换到 ${w}`,
     swScopeCli: "仅切换 CLI",
-    swScopeDesktop: "仅切换 Desktop",
+    swScopeDesktop: "仅切换桌面端",
     swMore: "更多切换方式",
-    swToastBoth: (n) => `已切换到 ${n}（CLI + Desktop）`,
+    swToastBoth: (n) => `已切换到 ${n}（CLI + 桌面端）`,
     swToastCli: (n) => `已切换到 ${n}（仅 CLI）`,
-    swToastDesktop: (n) => `已把 Devin Desktop 切换到 ${n}`,
-    swToastNoDesktop: (n) => `已切换到 ${n}（CLI；未检测到 Desktop）`,
+    swToastDesktop: (n) => `已把桌面端切换到 ${n}`,
+    swToastNoDesktop: (n) => `已切换到 ${n}（CLI；未检测到桌面端）`,
     swToastDesktopFail: (n, e) =>
-      `已切换到 ${n}（CLI）——Desktop 同步失败：${e}`,
-    swQuitDesktop: "Devin Desktop 正在运行——请先完全退出再切换",
+      `已切换到 ${n}（CLI）——桌面端同步失败：${e}`,
+    swQuitDesktop: "Devin 桌面端正在运行——请先完全退出再切换",
     restartWarn: (w, ps) => `已切换到 ${w}。重启这些进程后生效：${ps}`,
     launched: (n) => `已用 ${n} 启动并行 devin 会话`,
     runThis: (c) => `在终端中运行：${c}`,
     linkCopied: "链接已复制——可在任何浏览器或隐身窗口打开",
-    tokenReq: "需要 token",
+    tokenReq: "需要令牌",
     delSure: "确认删除",
     delSureLive: "仅删快照·保持登录",
   },
@@ -181,6 +195,9 @@ function applyI18n() {
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll("[data-i18n-ph]").forEach((el) => {
+    el.placeholder = t(el.dataset.i18nPh);
   });
   $("langBtn").textContent = lang === "zh" ? "EN" : "中";
   refresh();
@@ -583,10 +600,15 @@ for (const t2 of document.querySelectorAll(".tab")) {
     for (const pane of document.querySelectorAll(".tabpane"))
       pane.classList.add("hidden");
     $("tab-" + t2.dataset.tab).classList.remove("hidden");
+    // The sign-out row only matters for browser-based flows.
+    document
+      .querySelector(".logoutrow")
+      .classList.toggle("hidden", t2.dataset.tab === "desktop");
   };
 }
 
 async function saveCurrent() {
+  toast(t("saving"));
   try {
     const p = await invoke("save_current", { name: "", note: "" });
     toast(t("savedAs", p.name));
@@ -598,6 +620,19 @@ async function saveCurrent() {
 }
 
 $("saveCurrent").onclick = (e) => pend(e.currentTarget, saveCurrent);
+
+$("importDesktop").onclick = (e) =>
+  pend(e.currentTarget, async () => {
+    toast(t("importing"));
+    try {
+      const p = await invoke("import_desktop", { name: "" });
+      toast(t("savedAs", p.name));
+      closeSheet();
+      refresh(true);
+    } catch (err) {
+      toast(String(err), true);
+    }
+  });
 
 $("tokenLink").onclick = (e) =>
   pend(e.currentTarget, async () => {
@@ -627,6 +662,7 @@ $("saveToken").onclick = (e) =>
   pend(e.currentTarget, async () => {
     const code = $("tokenValue").value.trim();
     if (!code) return toast(t("tokenReq"), true);
+    toast(t("saving"));
     try {
       const p = await invoke("manual_finish", { name: "", code });
       toast(t("savedTok", p.email || p.name));

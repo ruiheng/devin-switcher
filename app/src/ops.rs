@@ -241,6 +241,24 @@ pub fn add_token(name: &str, token: &str) -> Result<ProfileInfo, String> {
     if token.is_empty() {
         return Err("token is empty".into());
     }
+    add_token_named(name, token)
+}
+
+/// Save credentials produced out-of-band (manual code exchange in the
+/// CLI). Identity + quota are fetched as usual.
+pub fn save_creds(creds: &[u8], name: &str) -> Result<ProfileInfo, String> {
+    save_account(creds, account_of(creds), None, name, "")
+}
+
+/// Import whatever Devin Desktop is signed in as — decrypts its stored
+/// session token, verifies it like a pasted token, then saves. Works
+/// while Desktop is running (read-only DB access).
+pub fn import_desktop(name: &str) -> Result<ProfileInfo, String> {
+    let s = desktop::current_session()?;
+    add_token_named(name, &s.token)
+}
+
+fn add_token_named(name: &str, token: &str) -> Result<ProfileInfo, String> {
     let creds = login::credentials_toml(
         token,
         "https://server.codeium.com",
@@ -254,12 +272,6 @@ pub fn add_token(name: &str, token: &str) -> Result<ProfileInfo, String> {
         return Err("token not recognized: empty user status".into());
     }
     save_account(&creds, u, None, name, "")
-}
-
-/// Save credentials produced out-of-band (manual code exchange in the
-/// CLI). Identity + quota are fetched as usual.
-pub fn save_creds(creds: &[u8], name: &str) -> Result<ProfileInfo, String> {
-    save_account(creds, account_of(creds), None, name, "")
 }
 
 /// Switch to a stored profile. `scope`: "all" (CLI + Desktop), "cli",

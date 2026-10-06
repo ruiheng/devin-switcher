@@ -75,6 +75,12 @@ mod gui {
         ops::add_token(&name, &token)
     }
 
+    /// Save Devin Desktop's current sign-in as an account.
+    #[tauri::command]
+    pub async fn import_desktop(name: String) -> Result<ProfileInfo, String> {
+        ops::import_desktop(&name)
+    }
+
     /// Manual (paste-code) login for the GUI's token tab: same PKCE round
     /// as dsw login — the URL is shown for copy/open, the user pastes the
     /// code the page displays.
@@ -123,6 +129,7 @@ pub fn run() {
             gui::poll_login,
             gui::cancel_login,
             gui::add_token,
+            gui::import_desktop,
             gui::manual_start,
             gui::manual_finish,
             gui::launch_parallel,

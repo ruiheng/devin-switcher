@@ -99,6 +99,7 @@ fn usage() -> &'static str {
      \x20 delete <name>         remove a saved account\n\
      \x20 refresh <name>        re-fetch a saved account's quota\n\
      \x20 login [name]          add an account (prompts for a session token)\n\
+     \x20 import-desktop [name] save Devin Desktop's current sign-in\n\
      \x20 add-token <token> [name]  same, non-interactive\n\
      \x20 parallel <name> [cwd] print a command to run a parallel session"
 }
@@ -165,6 +166,11 @@ fn main() -> ExitCode {
                 .map(|p| show_account(&p))
         }
         "login" | "add" => cmd_login(args.get(1).map(String::as_str).unwrap_or("")),
+        "import-desktop" => ops::import_desktop(args.get(1).map(String::as_str).unwrap_or(""))
+            .map(|p| {
+                println!("imported {}", p.name);
+                show_account(&p);
+            }),
         "parallel" | "par" => args
             .get(1)
             .ok_or_else(|| "parallel needs an account name".to_string())

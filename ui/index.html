@@ -39,6 +39,7 @@
         <button class="tab active" data-tab="login" data-i18n="tabLogin">Browser sign-in</button>
         <button class="tab" data-tab="current" data-i18n="tabCurrent">Save current</button>
         <button class="tab" data-tab="token" data-i18n="tabToken">Paste token</button>
+        <button class="tab" data-tab="desktop" data-i18n="tabDesktop">Desktop</button>
       </div>
 
       <div class="tabpane" id="tab-login">
@@ -80,9 +81,15 @@
         </div>
         <div class="field">
           <label data-i18n="codeOrToken">Code or token</label>
-          <input id="tokenValue" type="password" placeholder="code or devin-session-token$…" autocomplete="off">
+          <input id="tokenValue" type="password" data-i18n-ph="codeOrTokenPh" placeholder="code or devin-session-token$…" autocomplete="off">
         </div>
         <button id="saveToken" class="primary" data-i18n="saveToken">Save</button>
+      </div>
+
+      <div class="tabpane hidden" id="tab-desktop">
+        <p class="hint" data-i18n="desktopHint">Import the account Devin Desktop is
+        signed in as — reads its stored session; Desktop can stay open.</p>
+        <button id="importDesktop" class="primary" data-i18n="importDesktop">Import Desktop sign-in</button>
       </div>
 
       <div class="logoutrow">
