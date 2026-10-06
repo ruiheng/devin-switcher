@@ -35,8 +35,10 @@ const I18N = {
       "Save the account the devin CLI is signed in as right now. It's named after the account's email automatically.",
     saveCurrent: "Save current sign-in",
     tokenHint:
-      "Paste a session token (devin-session-token$…) — e.g. the windsurf_api_key from an existing credentials.toml.",
-    saveToken: "Save token",
+      "Get a sign-in link, open it in any browser — the page shows a code after sign-in. Paste the code (or a devin-session-token$…) below.",
+    getLink: "Get sign-in link",
+    codeOrToken: "Code or token",
+    saveToken: "Save",
     noProfiles: "No profiles yet.<br>Add your first account below.",
     unknown: "unknown account",
     swUse: "Switch",
@@ -89,8 +91,10 @@ const I18N = {
       "保存 devin CLI 当前登录的账号。profile 会按邮箱自动命名。",
     saveCurrent: "保存当前登录",
     tokenHint:
-      "粘贴 session token（devin-session-token$…）——例如已有 credentials.toml 里的 windsurf_api_key。",
-    saveToken: "保存 token",
+      "生成登录链接，在任何浏览器打开——登录后页面会显示一个 code。把 code（或 devin-session-token$…）粘贴到下面。",
+    getLink: "生成登录链接",
+    codeOrToken: "Code 或 token",
+    saveToken: "保存",
     noProfiles: "还没有 profile。<br>在下方添加第一个账号。",
     unknown: "未知账号",
     swUse: "切换",
@@ -383,11 +387,34 @@ $("saveCurrent").onclick = async () => {
   }
 };
 
-$("saveToken").onclick = async () => {
-  const token = $("tokenValue").value.trim();
-  if (!token) return toast(t("tokenReq"), true);
+$("tokenLink").onclick = async () => {
   try {
-    const p = await invoke("add_token", { name: "", token });
+    $("tokenUrl").value = await invoke("manual_start");
+    $("tokenLinkRow").classList.remove("hidden");
+  } catch (e) {
+    toast(String(e), true);
+  }
+};
+
+$("openTokenUrl").onclick = () => {
+  const url = $("tokenUrl").value;
+  if (url) open(url).catch(() => {});
+};
+
+$("copyTokenUrl").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($("tokenUrl").value);
+    toast(t("linkCopied"));
+  } catch {
+    $("tokenUrl").select();
+  }
+};
+
+$("saveToken").onclick = async () => {
+  const code = $("tokenValue").value.trim();
+  if (!code) return toast(t("tokenReq"), true);
+  try {
+    const p = await invoke("manual_finish", { name: "", code });
     toast(t("savedTok", p.email || p.name));
     closeSheet();
     refresh();

@@ -67,14 +67,20 @@
       </div>
 
       <div class="tabpane hidden" id="tab-token">
-        <p class="hint" data-i18n="tokenHint">Paste a session token
-        (devin-session-token$…) — e.g. the windsurf_api_key from an
-        existing credentials.toml.</p>
-        <div class="field">
-          <label>Token</label>
-          <input id="tokenValue" placeholder="devin-session-token$…" autocomplete="off">
+        <p class="hint" data-i18n="tokenHint">Get a sign-in link, open it in
+        any browser — the page shows a code after sign-in. Paste the code
+        (or a devin-session-token$…) below.</p>
+        <button id="tokenLink" class="ghost" data-i18n="getLink">Get sign-in link</button>
+        <div id="tokenLinkRow" class="linkrow hidden" style="margin:8px 0">
+          <input id="tokenUrl" readonly>
+          <button id="copyTokenUrl" data-i18n="copy">Copy</button>
+          <button id="openTokenUrl" data-i18n="open">Open</button>
         </div>
-        <button id="saveToken" class="primary" data-i18n="saveToken">Save token</button>
+        <div class="field">
+          <label data-i18n="codeOrToken">Code or token</label>
+          <input id="tokenValue" placeholder="code or devin-session-token$…" autocomplete="off">
+        </div>
+        <button id="saveToken" class="primary" data-i18n="saveToken">Save</button>
       </div>
 
       <button id="closeSheet" class="close">✕</button>
