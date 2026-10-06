@@ -46,7 +46,8 @@ const I18N = {
     unknown: "unknown account",
     swUse: "Switch",
     swPar: "Run in parallel",
-    swRen: "Rename",
+    swHint: "double-click to switch",
+    renHint: "double-click to rename",
     swRef: "Refresh quota",
     swDel: "Delete",
     active: "ACTIVE",
@@ -68,7 +69,6 @@ const I18N = {
     tokenReq: "Token required",
     delConfirm: (n) =>
       `Delete account "${n}"? Its saved credentials are removed.`,
-    renamePrompt: "Rename account",
   },
   zh: {
     currentTag: "当前登录",
@@ -104,7 +104,8 @@ const I18N = {
     unknown: "未知账号",
     swUse: "切换",
     swPar: "并行运行",
-    swRen: "改名",
+    swHint: "双击切换",
+    renHint: "双击改名",
     swRef: "刷新额度",
     swDel: "删除",
     active: "使用中",
@@ -124,7 +125,6 @@ const I18N = {
     linkCopied: "链接已复制——可在任何浏览器或隐身窗口打开",
     tokenReq: "需要 token",
     delConfirm: (n) => `删除账号「${n}」？保存的凭据将被移除。`,
-    renamePrompt: "重命名账号",
   },
 };
 
@@ -204,19 +204,24 @@ function renderStatus(s) {
 // % remaining for ACU. Green → amber → red as it drains.
 function quotaHtml(u) {
   if (!u) return "";
-  const bar = (pct) => {
+  const bar = (pct, cls) => {
     const p = Math.max(0, Math.min(100, pct));
-    const c = p > 50 ? "ok" : p > 20 ? "warn" : "low";
+    const c = cls || (p > 50 ? "ok" : p > 20 ? "warn" : "low");
     return `<div class="qbar"><i class="${c}" style="width:${p}%"></i></div>`;
   };
   const fmtDate = (unix) => {
     const d = new Date(unix * 1000);
     return `${d.getMonth() + 1}/${d.getDate()}`;
   };
-  const row = (label, pct, val) =>
+  const row = (label, pct, val, cls) =>
     `<div class="qrow"><span class="qlab">${label}</span>` +
-    `${bar(pct)}<span class="qval">${val}</span></div>`;
+    `${bar(pct, cls)}<span class="qval">${val}</span></div>`;
   const rows = [];
+  // Daily without a weekly row means the weekly window is exhausted —
+  // show it as 0% rather than omitting it. A spent weekly also makes the
+  // daily remainder unusable, so the daily bar stays muted, not green.
+  const weekly = u.weekly_left ?? (u.daily_left != null ? 0 : null);
+  const weeklyDead = weekly === 0;
   if (u.daily_left != null) {
     rows.push(
       row(
@@ -225,16 +230,17 @@ function quotaHtml(u) {
         `${Math.round(u.daily_left)}%` +
           (u.daily_reset_unix
             ? ` · ${t("resets")} ${fmtDate(u.daily_reset_unix)}`
-            : "")
+            : ""),
+        weeklyDead ? "mut" : undefined
       )
     );
   }
-  if (u.weekly_left != null) {
+  if (weekly != null) {
     rows.push(
       row(
         t("weekly"),
-        u.weekly_left,
-        `${Math.round(u.weekly_left)}%` +
+        weekly,
+        `${Math.round(weekly)}%` +
           (u.weekly_reset_unix
             ? ` · ${t("resets")} ${fmtDate(u.weekly_reset_unix)}`
             : "")
@@ -268,6 +274,8 @@ function renderProfiles(profiles, status) {
   signedIn = !!status?.auth?.logged_in;
   activeSaved = !!active;
   $("current").classList.toggle("hidden", !!active);
+  // Don't clobber an in-progress inline rename on the 5s poll.
+  if (el.querySelector(".rename-in")) return;
   if (!profiles.length) {
     el.innerHTML = `<p class="sub empty">${t(
       signedIn ? "noProfilesSignedIn" : "noProfiles"
@@ -286,10 +294,15 @@ function renderProfiles(profiles, status) {
   for (const p of profiles) {
     const card = document.createElement("div");
     card.className = "profile" + (p.is_active ? " active" : "");
+    if (!p.is_active) {
+      card.classList.add("switchable");
+      card.title = t("swHint");
+    }
     card.innerHTML = `
       <div class="top">
-        <span class="name">${esc(p.name)}</span>
+        <span class="name" title="${esc(t("renHint"))}">${esc(p.name)}</span>
         ${p.is_active ? `<span class="badge">${t("active")}</span>` : ""}
+        <button class="icobtn" data-act="ref" title="${t("swRef")}">↻</button>
       </div>
       <div class="meta">${esc(
         [p.email || p.display_name || t("unknown"), p.plan]
@@ -300,17 +313,24 @@ function renderProfiles(profiles, status) {
       ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
       <div class="actions">
         ${p.is_active ? "" : `<button class="use" data-act="use">${t("swUse")}</button><button data-act="par">${t("swPar")}</button>`}
-        <button data-act="ren">${t("swRen")}</button>
-        <button data-act="ref" title="${t("swRef")}">↻</button>
         <button class="danger" data-act="del">${t("swDel")}</button>
       </div>`;
     const useBtn = card.querySelector('[data-act="use"]');
     if (useBtn) useBtn.onclick = () => useProfile(p.name);
     const parBtn = card.querySelector('[data-act="par"]');
     if (parBtn) parBtn.onclick = () => parallel(p.name);
-    card.querySelector('[data-act="ren"]').onclick = () => rename(p.name);
     card.querySelector('[data-act="ref"]').onclick = () => refreshUsage(p.name);
     card.querySelector('[data-act="del"]').onclick = () => del(p.name);
+    card.querySelector(".name").ondblclick = (e) => {
+      e.stopPropagation();
+      inlineRename(e.currentTarget, p.name);
+    };
+    if (!p.is_active) {
+      card.ondblclick = (e) => {
+        if (e.target.closest("button, input")) return;
+        useProfile(p.name);
+      };
+    }
     el.appendChild(card);
   }
 }
@@ -348,15 +368,34 @@ async function parallel(name) {
   }
 }
 
-async function rename(name) {
-  const to = prompt(t("renamePrompt"), name);
-  if (to == null || to.trim() === "" || to.trim() === name) return;
-  try {
-    await invoke("rename_profile", { from: name, to: to.trim() });
+// Double-click a name → swap it for an input. Enter/blur commits,
+// Esc cancels. `done` guards against blur firing after Enter's commit.
+function inlineRename(nameEl, old) {
+  const input = document.createElement("input");
+  input.className = "rename-in";
+  input.value = old;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    const to = input.value.trim();
+    if (save && to && to !== old) {
+      try {
+        await invoke("rename_profile", { from: old, to });
+      } catch (e) {
+        toast(String(e), true);
+      }
+    }
     refresh();
-  } catch (e) {
-    toast(String(e), true);
-  }
+  };
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") finish(true);
+    if (e.key === "Escape") finish(false);
+  };
+  input.onblur = () => finish(true);
 }
 
 async function refreshUsage(name) {

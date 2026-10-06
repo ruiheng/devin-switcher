@@ -66,6 +66,7 @@ header { position: relative; }
 .qbar > i.ok { background: var(--green); }
 .qbar > i.warn { background: var(--amber); }
 .qbar > i.low { background: var(--red); }
+.qbar > i.mut { background: var(--sub); opacity: .45; }
 .qval { color: var(--sub); white-space: nowrap; }
 .qfoot { font-size: 11px; color: var(--sub); margin-top: 2px; }
 
@@ -90,6 +91,17 @@ main { padding: 14px 18px; overflow-y: auto; flex: 1; }
 .profile.active { border-color: rgba(63,185,80,.55); }
 .profile .top { display: flex; align-items: center; gap: 8px; }
 .profile .name { font-weight: 600; }
+.profile.switchable { cursor: pointer; }
+.icobtn {
+  margin-left: auto; padding: 1px 6px; font-size: 12px;
+  background: transparent; border-color: transparent; color: var(--sub);
+}
+.icobtn:hover { color: var(--text); border-color: var(--border); }
+.rename-in {
+  font: inherit; font-weight: 600; width: 16ch;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--accent); border-radius: 6px; padding: 0 6px;
+}
 .badge {
   font-size: 10.5px; padding: 1px 7px; border-radius: 20px;
   background: rgba(63,185,80,.15); color: var(--green);
