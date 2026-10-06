@@ -299,14 +299,15 @@ function renderProfiles(profiles, status) {
       ${p.usage ? `<div class="quota">${quotaHtml(p.usage)}</div>` : ""}
       ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
       <div class="actions">
-        <button class="use" data-act="use">${t("swUse")}</button>
-        <button data-act="par">${t("swPar")}</button>
+        ${p.is_active ? "" : `<button class="use" data-act="use">${t("swUse")}</button><button data-act="par">${t("swPar")}</button>`}
         <button data-act="ren">${t("swRen")}</button>
         <button data-act="ref" title="${t("swRef")}">↻</button>
         <button class="danger" data-act="del">${t("swDel")}</button>
       </div>`;
-    card.querySelector('[data-act="use"]').onclick = () => useProfile(p.name);
-    card.querySelector('[data-act="par"]').onclick = () => parallel(p.name);
+    const useBtn = card.querySelector('[data-act="use"]');
+    if (useBtn) useBtn.onclick = () => useProfile(p.name);
+    const parBtn = card.querySelector('[data-act="par"]');
+    if (parBtn) parBtn.onclick = () => parallel(p.name);
     card.querySelector('[data-act="ren"]').onclick = () => rename(p.name);
     card.querySelector('[data-act="ref"]').onclick = () => refreshUsage(p.name);
     card.querySelector('[data-act="del"]').onclick = () => del(p.name);
