@@ -218,11 +218,15 @@ fn cmd_list() -> Result<(), String> {
     Ok(())
 }
 
-/// Interactive login = paste a session token (hidden input). On unix the
-/// terminal echo is disabled while reading; on other platforms just reads.
+/// Interactive login = paste a session token (hidden input). The token
+/// page is the CLI's own manual-flow page (`--force-manual-token-flow`
+/// opens it), made for SSH sessions where localhost callback can't run.
+/// On unix the terminal echo is disabled while reading.
 fn cmd_login(name: &str) -> Result<(), String> {
-    eprintln!("paste a devin-session-token$… (input hidden)");
-    eprintln!("get it from the sign-in page of a logged-in devin.ai session\n");
+    eprintln!("1. open in a browser where the Devin account is (or will be) signed in:");
+    eprintln!("\n     https://app.devin.ai/auth/cli/token\n");
+    eprintln!("2. sign in — the page shows a devin-session-token$…\n");
+    eprintln!("3. paste it here (input hidden):");
     let mut tok = String::new();
     #[cfg(unix)]
     {
