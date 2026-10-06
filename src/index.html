@@ -40,9 +40,8 @@
       </div>
 
       <div class="tabpane" id="tab-login">
-        <p class="hint" data-i18n="loginHint">Sign in with a browser. The page asks which
-        account to use — your existing devin.ai session won't auto-apply.
-        Open the link in any browser or an incognito window.</p>
+        <p class="hint" data-i18n="loginHint">Sign in via your browser — it uses the
+        devin account already signed in there, if any.</p>
         <p class="hint" data-i18n="loginName">The account is named after its
         email — rename it from the card afterwards.</p>
         <button id="startLogin" class="primary" data-i18n="startLogin">Start sign-in</button>
@@ -82,6 +81,12 @@
           <input id="tokenValue" type="password" placeholder="code or devin-session-token$…" autocomplete="off">
         </div>
         <button id="saveToken" class="primary" data-i18n="saveToken">Save</button>
+      </div>
+
+      <div class="logoutrow">
+        <span class="sub" data-i18n="logoutHint">To sign in with a different devin account, sign out in your browser first:</span>
+        <button id="openLogout" data-i18n="openLogout">Sign out in default browser</button>
+        <button id="copyLogout" class="ghost" data-i18n="copyLogout">Copy sign-out link</button>
       </div>
 
       <button id="closeSheet" class="close">✕</button>

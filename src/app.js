@@ -22,7 +22,7 @@ const I18N = {
     tabCurrent: "Save current",
     tabToken: "Paste token",
     loginHint:
-      "Sign in with a browser. The page asks which account to use — your existing devin.ai session won't auto-apply. Open the link in any browser or an incognito window.",
+      "Sign in via your browser — it uses the devin account already signed in there, if any.",
     loginName:
       "The account is named after its email — rename it from the card afterwards.",
     startLogin: "Start sign-in",
@@ -32,6 +32,10 @@ const I18N = {
     open: "Open",
     terminalInstead: "Or run in a terminal instead",
     cancel: "Cancel",
+    logoutHint:
+      "To sign in with a different devin account, sign out in your browser first:",
+    openLogout: "Sign out in default browser",
+    copyLogout: "Copy sign-out link",
     currentHint:
       "Save the account the devin CLI is signed in as right now. It's named after the account's email automatically.",
     saveCurrent: "Save current sign-in",
@@ -87,7 +91,7 @@ const I18N = {
     tabCurrent: "保存当前",
     tabToken: "粘贴 token",
     loginHint:
-      "在浏览器中登录。页面会强制让你选账号——已登录的 devin.ai 会话不会被自动复用。链接可以在任何浏览器或隐身窗口打开。",
+      "在浏览器中完成登录——会使用浏览器里已登录的 devin 账号（如已登录）。",
     loginName: "账号会按邮箱自动命名，之后可在卡片上改名。",
     startLogin: "开始登录",
     waiting: "等待登录…",
@@ -96,6 +100,9 @@ const I18N = {
     open: "打开",
     terminalInstead: "或者在终端里运行",
     cancel: "取消",
+    logoutHint: "要登录与浏览器中不同的 devin 账号？先在浏览器中登出：",
+    openLogout: "在默认浏览器中登出",
+    copyLogout: "复制登出地址",
     currentHint:
       "保存 devin CLI 当前登录的账号。账号会按邮箱自动命名。",
     saveCurrent: "保存当前登录",
@@ -491,6 +498,10 @@ async function del(name) {
   }
 }
 
+// devin.ai hides its logout link; offer it here so a second account can
+// actually be signed into in the same browser profile.
+const LOGOUT_URL = "https://app.devin.ai/logout";
+
 // ---- Add sheet ----
 
 $("addBtn").onclick = () => {
@@ -598,6 +609,18 @@ $("copyUrl").onclick = async () => {
     toast(t("linkCopied"));
   } catch {
     $("loginUrl").select();
+  }
+};
+
+$("openLogout").onclick = () => {
+  open(LOGOUT_URL).catch(() => {});
+};
+$("copyLogout").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(LOGOUT_URL);
+    toast(t("linkCopied"));
+  } catch {
+    toast(LOGOUT_URL);
   }
 };
 

@@ -173,6 +173,12 @@ button.busy { cursor: progress; }
 
 .wait-text { color: var(--amber); font-size: 13px; margin: 12px 0 8px; }
 .linkrow { display: flex; gap: 6px; }
+.logoutrow {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.logoutrow .sub { flex: 1; white-space: normal; }
 .linkrow input {
   flex: 1; min-width: 0; background: var(--bg); color: var(--sub);
   border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px;
