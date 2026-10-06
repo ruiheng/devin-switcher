@@ -19,58 +19,58 @@ mod gui {
     static MANUAL: Mutex<Option<ManualLogin>> = Mutex::new(None);
 
     #[tauri::command]
-    pub fn get_status() -> Status {
+    pub async fn get_status() -> Status {
         ops::status()
     }
 
     #[tauri::command]
-    pub fn list_profiles() -> Vec<ProfileInfo> {
+    pub async fn list_profiles() -> Vec<ProfileInfo> {
         store::list()
     }
 
     #[tauri::command]
-    pub fn save_current(name: String, note: String) -> Result<ProfileInfo, String> {
+    pub async fn save_current(name: String, note: String) -> Result<ProfileInfo, String> {
         ops::save_current(&name, &note)
     }
 
     #[tauri::command]
-    pub fn delete_profile(name: String) -> Result<(), String> {
+    pub async fn delete_profile(name: String) -> Result<(), String> {
         store::remove(&name)
     }
 
     #[tauri::command]
-    pub fn rename_profile(from: String, to: String) -> Result<ProfileInfo, String> {
+    pub async fn rename_profile(from: String, to: String) -> Result<ProfileInfo, String> {
         store::rename(&from, &to)
     }
 
     #[tauri::command]
-    pub fn use_profile(name: String) -> Result<UseResult, String> {
+    pub async fn use_profile(name: String) -> Result<UseResult, String> {
         ops::use_profile(&name)
     }
 
     #[tauri::command]
-    pub fn refresh_usage(name: String) -> Result<ProfileInfo, String> {
+    pub async fn refresh_usage(name: String) -> Result<ProfileInfo, String> {
         ops::refresh_usage(&name)
     }
 
     #[tauri::command]
-    pub fn start_login() -> Result<login::LoginOffer, String> {
+    pub async fn start_login() -> Result<login::LoginOffer, String> {
         login::start()
     }
 
     #[tauri::command]
-    pub fn poll_login(id: u64, name: String, note: String) -> Result<LoginOutcome, String> {
+    pub async fn poll_login(id: u64, name: String, note: String) -> Result<LoginOutcome, String> {
         ops::finish_login(id, &name, &note)
     }
 
     #[tauri::command]
-    pub fn cancel_login(id: u64) -> Result<(), String> {
+    pub async fn cancel_login(id: u64) -> Result<(), String> {
         login::cancel(id);
         Ok(())
     }
 
     #[tauri::command]
-    pub fn add_token(name: String, token: String) -> Result<ProfileInfo, String> {
+    pub async fn add_token(name: String, token: String) -> Result<ProfileInfo, String> {
         ops::add_token(&name, &token)
     }
 
@@ -78,7 +78,7 @@ mod gui {
     /// as dsw login — the URL is shown for copy/open, the user pastes the
     /// code the page displays.
     #[tauri::command]
-    pub fn manual_start() -> String {
+    pub async fn manual_start() -> String {
         let m = login::manual_start();
         let url = m.url.clone();
         *MANUAL.lock().unwrap() = Some(m);
@@ -86,7 +86,7 @@ mod gui {
     }
 
     #[tauri::command]
-    pub fn manual_finish(name: String, code: String) -> Result<ProfileInfo, String> {
+    pub async fn manual_finish(name: String, code: String) -> Result<ProfileInfo, String> {
         let code = code.trim().to_string();
         // Accept a raw session token too — some users land here with one.
         if code.starts_with("devin-session-token") {
@@ -100,7 +100,7 @@ mod gui {
     }
 
     #[tauri::command]
-    pub fn launch_parallel(name: String, cwd: Option<String>) -> Result<ParallelLaunch, String> {
+    pub async fn launch_parallel(name: String, cwd: Option<String>) -> Result<ParallelLaunch, String> {
         ops::launch_parallel(&name, cwd.as_deref())
     }
 }

@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 use serde::Serialize;
 
@@ -21,12 +23,34 @@ pub struct Status {
     pub credentials_path: String,
 }
 
+/// `devin auth status` spawns the CLI — seconds on Windows — so UI polling
+/// caches the parsed result keyed by the credentials file's (mtime, len).
+/// Any write (switch, external login, delete) changes the key and forces a
+/// fresh check.
+static AUTH_CACHE: Mutex<Option<(Option<(SystemTime, u64)>, AuthStatus)>> =
+    Mutex::new(None);
+
+fn auth_status_cached() -> AuthStatus {
+    let key = fs::metadata(paths::credentials_path())
+        .and_then(|m| m.modified().map(|t| (t, m.len())))
+        .ok();
+    let mut g = AUTH_CACHE.lock().unwrap();
+    if let Some((k, st)) = g.as_ref() {
+        if *k == key {
+            return st.clone();
+        }
+    }
+    let st = devincli::auth_status(None).unwrap_or_default();
+    *g = Some((key, st.clone()));
+    st
+}
+
 pub fn status() -> Status {
     let usage = fs::read(paths::credentials_path())
         .ok()
         .and_then(|c| usage::user_status_cached(&c).ok());
     Status {
-        auth: devincli::auth_status(None).unwrap_or_default(),
+        auth: auth_status_cached(),
         usage,
         running: running_devin_processes(),
         devin_installed: paths::devin_bin().is_some(),
