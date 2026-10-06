@@ -55,7 +55,10 @@ const I18N = {
     active: "ACTIVE",
     daily: "Daily",
     weekly: "Weekly",
-    resets: "resets",
+    resetNow: "resetting shortly",
+    resetInHMS: (c) => `resets in ${c}`,
+    resetInDH: (d, h) => `resets in ${d}d ${h}h`,
+    resetOn: (d) => `resets ${d}`,
     used: "used",
     overage: "overage",
     planEnds: "plan ends",
@@ -115,7 +118,10 @@ const I18N = {
     active: "使用中",
     daily: "当天",
     weekly: "本周",
-    resets: "重置",
+    resetNow: "即将重置",
+    resetInHMS: (c) => `${c} 后重置`,
+    resetInDH: (d, h) => `${d} 天 ${h} 小时后重置`,
+    resetOn: (d) => `${d} 重置`,
     used: "已用",
     overage: "超额余额",
     planEnds: "周期结束",
@@ -236,10 +242,12 @@ function quotaHtml(u) {
     const c = cls || (p > 50 ? "ok" : p > 20 ? "warn" : "low");
     return `<div class="qbar"><i class="${c}" style="width:${p}%"></i></div>`;
   };
-  const fmtDate = (unix) => {
-    const d = new Date(unix * 1000);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
-  };
+  // Carries the unix stamp so the 1s ticker can keep it live — survives
+  // the 5s re-render since each tick re-queries the DOM.
+  const rst = (unix) =>
+    unix
+      ? ` · <span class="reset" data-reset="${unix}">${resetText(unix)}</span>`
+      : "";
   const row = (label, pct, val, cls) =>
     `<div class="qrow"><span class="qlab">${label}</span>` +
     `${bar(pct, cls)}<span class="qval">${val}</span></div>`;
@@ -254,10 +262,7 @@ function quotaHtml(u) {
       row(
         t("daily"),
         u.daily_left,
-        `${Math.round(u.daily_left)}%` +
-          (u.daily_reset_unix
-            ? ` · ${t("resets")} ${fmtDate(u.daily_reset_unix)}`
-            : ""),
+        `${Math.round(u.daily_left)}%` + rst(u.daily_reset_unix),
         weeklyDead ? "mut" : undefined
       )
     );
@@ -267,10 +272,7 @@ function quotaHtml(u) {
       row(
         t("weekly"),
         weekly,
-        `${Math.round(weekly)}%` +
-          (u.weekly_reset_unix
-            ? ` · ${t("resets")} ${fmtDate(u.weekly_reset_unix)}`
-            : "")
+        `${Math.round(weekly)}%` + rst(u.weekly_reset_unix)
       )
     );
   }
@@ -291,6 +293,24 @@ function quotaHtml(u) {
 }
 
 const r2 = (f) => Math.round(f * 100) / 100;
+
+// Relative reset — <24h is a live HH:MM:SS countdown (a bare date is
+// useless for a daily window), <8d is "Nd Nh", farther out a date.
+const pad2 = (n) => String(n).padStart(2, "0");
+function resetText(unix) {
+  const s = Math.floor(unix - Date.now() / 1000);
+  if (s <= 0) return t("resetNow");
+  if (s < 86400) {
+    const c = `${pad2(Math.floor(s / 3600))}:${pad2(
+      Math.floor((s % 3600) / 60)
+    )}:${pad2(s % 60)}`;
+    return t("resetInHMS", c);
+  }
+  const d = Math.floor(s / 86400);
+  if (d < 8) return t("resetInDH", d, Math.round((s % 86400) / 3600));
+  const dt = new Date(unix * 1000);
+  return t("resetOn", `${dt.getMonth() + 1}/${dt.getDate()}`);
+}
 
 function renderProfiles(profiles, status, force = false) {
   const el = $("profiles");
@@ -612,6 +632,14 @@ async function pollLogin() {
     stopLogin();
   }
 }
+
+// Keep quota countdowns ticking — one pass over [data-reset] spans a
+// second. Cheap; re-rendered nodes are picked up on the next tick.
+setInterval(() => {
+  document.querySelectorAll("[data-reset]").forEach((el) => {
+    el.textContent = resetText(+el.dataset.reset);
+  });
+}, 1000);
 
 applyI18n();
 setInterval(refresh, 5000);

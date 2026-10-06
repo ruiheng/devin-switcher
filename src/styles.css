@@ -71,6 +71,7 @@ header { position: relative; }
 .qbar > i.low { background: var(--red); }
 .qbar > i.mut { background: var(--sub); opacity: .45; }
 .qval { color: var(--sub); white-space: nowrap; }
+.reset { font-variant-numeric: tabular-nums; }
 .qfoot { font-size: 11px; color: var(--sub); margin-top: 2px; }
 
 main { padding: 14px 18px; overflow-y: auto; flex: 1; }
