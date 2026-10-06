@@ -428,25 +428,31 @@ fn open_terminal(cmdline: &str, cwd: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// End-to-end switch mechanics against sandboxed XDG dirs — never
-    /// touches the real sign-in. Single test fn so env mutation can't race.
+    /// End-to-end switch mechanics against sandboxed dirs — never touches
+    /// the real sign-in. Windows reads APPDATA, unix reads XDG_* (the same
+    /// override devin_cmd applies), so all of them point at a temp dir and
+    /// "real" paths are resolved through paths:: itself. Single test fn so
+    /// env mutation can't race.
     #[test]
     fn switch_roundtrip() {
         let tmp = std::env::temp_dir().join(format!("dsw-test-{}", std::process::id()));
-        let data = tmp.join("data");
-        let cfgd = tmp.join("cfg");
-        let prev_data = std::env::var("XDG_DATA_HOME").ok();
-        let prev_cfg = std::env::var("XDG_CONFIG_HOME").ok();
-        std::env::set_var("XDG_DATA_HOME", &data);
-        std::env::set_var("XDG_CONFIG_HOME", &cfgd);
+        let prev: Vec<(&'static str, Option<String>)> =
+            ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "APPDATA"]
+                .iter()
+                .map(|&k| (k, std::env::var(k).ok()))
+                .collect();
+        std::env::set_var("XDG_DATA_HOME", tmp.join("data"));
+        std::env::set_var("XDG_CONFIG_HOME", tmp.join("cfg"));
+        std::env::set_var("APPDATA", tmp.join("appdata"));
 
-        // current sign-in "old", a stored profile "a" with different creds
-        let real_creds = data.join("devin").join("credentials.toml");
+        // current sign-in "old", a stored account "a" with different creds
+        let real_creds = paths::credentials_path();
         fs::create_dir_all(real_creds.parent().unwrap()).unwrap();
         fs::write(&real_creds, b"old-creds").unwrap();
-        fs::create_dir_all(&cfgd.join("devin")).unwrap();
+        let real_cfg = paths::config_path();
+        fs::create_dir_all(real_cfg.parent().unwrap()).unwrap();
         fs::write(
-            cfgd.join("devin").join("config.json"),
+            &real_cfg,
             br#"{"devin":{"org_id":"org-old"},"agent":{}}"#,
         )
         .unwrap();
@@ -465,8 +471,7 @@ mod tests {
         let r = use_profile("a").unwrap();
         assert_eq!(fs::read(&real_creds).unwrap(), b"creds-a");
         let cfg: serde_json::Value =
-            serde_json::from_slice(&fs::read(cfgd.join("devin").join("config.json")).unwrap())
-                .unwrap();
+            serde_json::from_slice(&fs::read(&real_cfg).unwrap()).unwrap();
         assert_eq!(cfg["devin"]["org_id"], "org-a");
         assert!(cfg.get("agent").is_some(), "other keys preserved");
         assert!(
@@ -478,7 +483,7 @@ mod tests {
         );
         let _ = r; // auth may be empty without a devin-signed fake home
 
-        // rename keeps the profile active (byte-compare, not name tracking)
+        // rename keeps the account active (byte-compare, not name tracking)
         store::rename("a", "a-renamed").unwrap();
         assert!(
             store::list()
@@ -497,21 +502,18 @@ mod tests {
         assert_eq!(p.name, "a-renamed");
         assert_eq!(store::list().len(), 1, "no -2 duplicate");
 
-        // a profile with no org recorded clears the key entirely
+        // an account with no org recorded clears the key entirely
         store::save("b", b"creds-b", &Meta::default()).unwrap();
         use_profile("b").unwrap();
         let cfg: serde_json::Value =
-            serde_json::from_slice(&fs::read(cfgd.join("devin").join("config.json")).unwrap())
-                .unwrap();
+            serde_json::from_slice(&fs::read(&real_cfg).unwrap()).unwrap();
         assert!(cfg["devin"].get("org_id").is_none());
 
-        match prev_data {
-            Some(v) => std::env::set_var("XDG_DATA_HOME", v),
-            None => std::env::remove_var("XDG_DATA_HOME"),
-        }
-        match prev_cfg {
-            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        for (k, v) in prev {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
         }
         let _ = fs::remove_dir_all(&tmp);
     }
