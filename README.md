@@ -34,7 +34,7 @@ Only a Rust toolchain is needed (the frontend is static HTML/JS under
 ### GUI dev run
 
 ```bash
-cd src-tauri
+cd app
 cargo run          # builds and opens the Devin Switch window
 ```
 
@@ -44,10 +44,10 @@ cargo run          # builds and opens the Devin Switch window
 powershell .\bundle.ps1   # release build + bundle, installers copied to dist\
 ```
 
-(or `cd src-tauri && npx @tauri-apps/cli@2 build` directly)
+(or `cd app && npx @tauri-apps/cli@2 build` directly)
 
 Windows output lands in `dist/` (NSIS `-setup.exe` + MSI); raw bundles
-are under `src-tauri/target/release/bundle/` (macOS produces
+are under `app/target/release/bundle/` (macOS produces
 `.app`/`.dmg`, Linux `.AppImage`/`.deb`).
 
 Tauri system deps: macOS needs only Xcode CLT; Linux needs `webkit2gtk`
@@ -57,7 +57,7 @@ etc. (see the tauri.app prerequisites docs); Windows needs WebView2
 ### CLI (dsw) — no GUI deps
 
 ```bash
-cd src-tauri
+cd app
 cargo install --path . --no-default-features --bin dsw --root ~/.local
 # → ~/.local/bin/dsw
 ```
@@ -74,7 +74,7 @@ cargo run --no-default-features --bin dsw -- list
 ### Tests
 
 ```bash
-cd src-tauri && cargo test
+cd app && cargo test
 ```
 
 ## dsw usage

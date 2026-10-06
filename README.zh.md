@@ -27,7 +27,7 @@ vault，切换时原子替换 + 更新 `config.json` 的 `org_id`，CLI 和 Desk
 ### GUI 开发运行
 
 ```bash
-cd src-tauri
+cd app
 cargo run          # 编译并打开 Devin Switch 窗口
 ```
 
@@ -38,7 +38,7 @@ powershell .undle.ps1   # release 构建 + 打包，产物拷到 dist/
 ```
 
 Windows 产物在 `dist/`（NSIS `-setup.exe` + MSI）；
-原始输出在 `src-tauri/target/release/bundle/`（macOS 出 `.app`/`.dmg`，
+原始输出在 `app/target/release/bundle/`（macOS 出 `.app`/`.dmg`，
 Linux 出 `.AppImage`/`.deb`）。
 
 Tauri 的系统依赖：macOS 只需 Xcode CLT；Linux 需要 `webkit2gtk` 等
@@ -48,7 +48,7 @@ Tauri 的系统依赖：macOS 只需 Xcode CLT；Linux 需要 `webkit2gtk` 等
 ### CLI（dsw）安装——可无 GUI 依赖
 
 ```bash
-cd src-tauri
+cd app
 cargo install --path . --no-default-features --bin dsw --root ~/.local
 # → ~/.local/bin/dsw
 ```
@@ -65,7 +65,7 @@ cargo run --no-default-features --bin dsw -- list
 ### 测试
 
 ```bash
-cd src-tauri && cargo test
+cd app && cargo test
 ```
 
 ## dsw 用法
