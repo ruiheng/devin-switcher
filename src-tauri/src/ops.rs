@@ -116,13 +116,63 @@ fn pick_name(want: &str, u: &Usage) -> Result<String, String> {
     Ok(store::unique_name(&hint))
 }
 
+/// The vault already holds this account: same non-empty email, or
+/// byte-identical credentials.
+fn find_existing(creds: &[u8], u: &Usage) -> Option<String> {
+    for p in store::list() {
+        if !u.email.is_empty() && p.meta.email == u.email {
+            return Some(p.name);
+        }
+        if store::creds_of(&p.name)
+            .map(|c| c == creds)
+            .unwrap_or(false)
+        {
+            return Some(p.name);
+        }
+    }
+    None
+}
+
+/// Shared save path for every add-account flow. With an explicit `want`
+/// name we write exactly that profile; on auto-name, adding the same
+/// account again refreshes the existing profile's credentials and meta
+/// (keeping created_at/note) instead of minting a `-2` duplicate.
+fn save_account(
+    creds: &[u8],
+    u: Usage,
+    org: Option<String>,
+    want: &str,
+    note: &str,
+) -> Result<ProfileInfo, String> {
+    let name = if want.trim().is_empty() {
+        match find_existing(creds, &u) {
+            Some(existing) => existing,
+            None => pick_name("", &u)?,
+        }
+    } else {
+        store::sanitize_name(want)?
+    };
+    let mut m = meta_from(u, org, note);
+    if let Some(old) = store::list().into_iter().find(|p| p.name == name) {
+        m.created_at = old.meta.created_at;
+        if m.note.is_empty() {
+            m.note = old.meta.note;
+        }
+    }
+    store::save(&name, creds, &m)
+}
+
 /// Save whatever the CLI is currently signed in as.
 pub fn save_current(name: &str, note: &str) -> Result<ProfileInfo, String> {
     let creds =
         fs::read(paths::credentials_path()).map_err(|_| "Devin isn't signed in".to_string())?;
-    let u = account_of(&creds);
-    let name = pick_name(name, &u)?;
-    store::save(&name, &creds, &meta_from(u, config::current_org_id(), note))
+    save_account(
+        &creds,
+        account_of(&creds),
+        config::current_org_id(),
+        name,
+        note,
+    )
 }
 
 /// Finish a login round (PKCE callback or CLI-in-fake-home fallback).
@@ -131,11 +181,7 @@ pub fn finish_login(id: u64, name: &str, note: &str) -> Result<LoginOutcome, Str
         PollState::Waiting => Ok(LoginOutcome::Waiting),
         PollState::Failed { error } => Err(error),
         PollState::GotCreds { creds, home } => {
-            let res = (|| {
-                let u = account_of(&creds);
-                let name = pick_name(name, &u)?;
-                store::save(&name, &creds, &meta_from(u, None, note))
-            })();
+            let res = save_account(&creds, account_of(&creds), None, name, note);
             login::cleanup_home(&home);
             res.map(|profile| LoginOutcome::Done { profile })
         }
@@ -168,8 +214,7 @@ pub fn add_token(name: &str, token: &str) -> Result<ProfileInfo, String> {
     if u.email.is_empty() && u.name.is_empty() {
         return Err("token not recognized: empty user status".into());
     }
-    let name = pick_name(name, &u)?;
-    store::save(&name, &creds, &meta_from(u, None, ""))
+    save_account(&creds, u, None, name, "")
 }
 
 /// Switch the CLI (and thereby Desktop) to a stored profile.
@@ -438,6 +483,13 @@ mod tests {
         );
         assert!(store::rename("a-renamed", "a-renamed").is_ok());
         assert!(store::rename("missing", "x").is_err());
+
+        // saving the same sign-in twice refreshes instead of duplicating:
+        // current creds == a-renamed's creds, so it lands back there
+        save_current("", "").unwrap();
+        let p = save_current("", "").unwrap();
+        assert_eq!(p.name, "a-renamed");
+        assert_eq!(store::list().len(), 1, "no -2 duplicate");
 
         // a profile with no org recorded clears the key entirely
         store::save("b", b"creds-b", &Meta::default()).unwrap();
