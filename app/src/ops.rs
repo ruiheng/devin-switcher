@@ -7,6 +7,7 @@ use std::time::SystemTime;
 use serde::Serialize;
 
 use crate::config;
+use crate::desktop;
 use crate::devincli;
 use crate::login::{self, PollState};
 use crate::model::{now_stamp, AuthStatus, Meta, ProfileInfo, UseResult};
@@ -75,6 +76,7 @@ fn meta_from(u: Usage, org: Option<String>, note: &str) -> Meta {
     Meta {
         email: u.email.clone(),
         display_name: u.name.clone(),
+        user_id: u.user_id.clone(),
         plan: u.plan.clone(),
         org_id: u.org_id.clone().or(org),
         note: note.to_string(),
@@ -260,8 +262,11 @@ pub fn save_creds(creds: &[u8], name: &str) -> Result<ProfileInfo, String> {
     save_account(creds, account_of(creds), None, name, "")
 }
 
-/// Switch the CLI (and thereby Desktop) to a stored profile.
-pub fn use_profile(name: &str) -> Result<UseResult, String> {
+/// Switch to a stored profile. `scope`: "all" (CLI + Desktop), "cli",
+/// or "desktop". When Desktop is part of the scope it must be fully
+/// closed — its in-memory copy of state.vscdb wins over a live write,
+/// so we refuse rather than half-switch.
+pub fn use_profile(name: &str, scope: &str) -> Result<UseResult, String> {
     let name = store::sanitize_name(name)?;
     let creds = store::creds_of(&name)?;
     let meta = store::list()
@@ -269,9 +274,16 @@ pub fn use_profile(name: &str) -> Result<UseResult, String> {
         .find(|p| p.name == name)
         .map(|p| p.meta)
         .unwrap_or_default();
+    let want_cli = scope != "desktop";
+    let want_desktop = scope != "cli";
+
+    if want_desktop && desktop::is_running() {
+        return Err("devin_desktop_running".into());
+    }
 
     // Fresh quota + the account's own org_id, while we still can (a dead
     // network or unparseable profile shouldn't block the swap itself).
+    // Also the source of user_id for Desktop's session record.
     let u = usage::creds_secrets(&creds)
         .and_then(|(k, s)| usage::user_status(&k, &s))
         .ok();
@@ -280,20 +292,22 @@ pub fn use_profile(name: &str) -> Result<UseResult, String> {
         .and_then(|x| x.org_id.clone())
         .or(meta.org_id.clone());
 
-    let target = paths::credentials_path();
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let tmp = target.with_extension("tmp");
-    fs::write(&tmp, &creds).map_err(|e| format!("write credentials: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
-    }
-    fs::rename(&tmp, &target).map_err(|e| format!("rename credentials: {e}"))?;
+    if want_cli {
+        let target = paths::credentials_path();
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let tmp = target.with_extension("tmp");
+        fs::write(&tmp, &creds).map_err(|e| format!("write credentials: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+        }
+        fs::rename(&tmp, &target).map_err(|e| format!("rename credentials: {e}"))?;
 
-    config::apply_org_id(org.as_deref())?;
+        config::apply_org_id(org.as_deref())?;
+    }
 
     // The account we just wrote IS the live sign-in — report it from the
     // fresh fetch (or stored meta) instead of spawning `devin auth
@@ -315,17 +329,45 @@ pub fn use_profile(name: &str) -> Result<UseResult, String> {
         ..Default::default()
     };
     // Refresh the stored meta from whatever we just learned.
-    if let Some(u) = u {
+    if let Some(u) = &u {
         if !u.email.is_empty() || !u.plan.is_empty() {
-            let mut m = meta_from(u, org.clone(), &meta.note);
+            let mut m = meta_from(u.clone(), org.clone(), &meta.note);
             m.created_at = meta.created_at.clone();
             let _ = store::save(&name, &creds, &m);
         }
     }
 
+    let desktop = if !want_desktop {
+        "cli_only".to_string()
+    } else if !desktop::installed() {
+        "unavailable".to_string()
+    } else {
+        let token = usage::creds_secrets(&creds)
+            .map(|(k, _)| k)
+            .unwrap_or_default();
+        let pick = |f: fn(&usage::Usage) -> String, fb: String| {
+            u.as_ref()
+                .map(f)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(fb)
+        };
+        let label = pick(|x| x.name.clone(), meta.display_name.clone());
+        let uid = pick(|x| x.user_id.clone(), meta.user_id.clone());
+        let email = pick(|x| x.email.clone(), meta.email.clone());
+        match desktop::switch_session(&token, &label, &uid, &email) {
+            Ok(()) => "switched".to_string(),
+            Err(e) => format!("failed: {e}"),
+        }
+    };
+
     Ok(UseResult {
         auth,
-        restart_needed: running_devin_processes(),
+        restart_needed: if want_cli {
+            running_devin_processes()
+        } else {
+            Vec::new()
+        },
+        desktop,
     })
 }
 
@@ -525,7 +567,7 @@ mod tests {
         .unwrap();
 
         // switch
-        let r = use_profile("a").unwrap();
+        let r = use_profile("a", "cli").unwrap();
         assert_eq!(fs::read(&real_creds).unwrap(), b"creds-a");
         let cfg: serde_json::Value =
             serde_json::from_slice(&fs::read(&real_cfg).unwrap()).unwrap();
@@ -561,7 +603,7 @@ mod tests {
 
         // an account with no org recorded clears the key entirely
         store::save("b", b"creds-b", &Meta::default()).unwrap();
-        use_profile("b").unwrap();
+        use_profile("b", "cli").unwrap();
         let cfg: serde_json::Value =
             serde_json::from_slice(&fs::read(&real_cfg).unwrap()).unwrap();
         assert!(cfg["devin"].get("org_id").is_none());

@@ -94,7 +94,7 @@ fn usage() -> &'static str {
      \x20 status                current sign-in, quota, running devin processes\n\
      \x20 list                  saved accounts (* = active)\n\
      \x20 save [name]           save the current sign-in (name auto-derived)\n\
-     \x20 use <name>            switch CLI/Desktop to a saved account\n\
+     \x20 use <name> [--cli|--desktop]  switch to a saved account (default both)\n\
      \x20 rename <from> <to>    rename a saved account\n\
      \x20 delete <name>         remove a saved account\n\
      \x20 refresh <name>        re-fetch a saved account's quota\n\
@@ -116,7 +116,16 @@ fn main() -> ExitCode {
         "use" => args
             .get(1)
             .ok_or_else(|| "use needs an account name".to_string())
-            .and_then(|n| ops::use_profile(n))
+            .and_then(|n| {
+                let scope = if args.iter().any(|a| a == "--cli") {
+                    "cli"
+                } else if args.iter().any(|a| a == "--desktop") {
+                    "desktop"
+                } else {
+                    "all"
+                };
+                ops::use_profile(n, scope)
+            })
             .map(|r| {
                 let who = if r.auth.logged_in {
                     r.auth.name
@@ -124,6 +133,12 @@ fn main() -> ExitCode {
                     "account".into()
                 };
                 println!("switched to {who}");
+                match r.desktop.as_str() {
+                    "switched" => println!("desktop: switched"),
+                    "unavailable" => println!("desktop: not installed"),
+                    d if d.starts_with("failed") => println!("{d}"),
+                    _ => {}
+                }
                 if !r.restart_needed.is_empty() {
                     println!("restart to apply: {}", r.restart_needed.join(", "));
                 }

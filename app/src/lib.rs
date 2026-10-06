@@ -1,4 +1,5 @@
 pub mod config;
+pub mod desktop;
 pub mod devincli;
 pub mod login;
 pub mod model;
@@ -44,8 +45,8 @@ mod gui {
     }
 
     #[tauri::command]
-    pub async fn use_profile(name: String) -> Result<UseResult, String> {
-        ops::use_profile(&name)
+    pub async fn use_profile(name: String, scope: Option<String>) -> Result<UseResult, String> {
+        ops::use_profile(&name, scope.as_deref().unwrap_or("all"))
     }
 
     #[tauri::command]

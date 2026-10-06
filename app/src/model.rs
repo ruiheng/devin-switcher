@@ -8,6 +8,8 @@ use crate::usage::Usage;
 pub struct Meta {
     pub email: String,
     pub display_name: String,
+    /// `user-<hex>`; Desktop's session record carries it as `account.id`.
+    pub user_id: String,
     pub plan: String,
     /// Last known devin.org_id for this account (from config.json).
     pub org_id: Option<String>,
@@ -35,6 +37,7 @@ pub struct AuthStatus {
     pub logged_in: bool,
     pub name: String,
     pub email: String,
+    pub user_id: String,
     pub plan: String,
     pub tier: String,
 }
@@ -43,8 +46,11 @@ pub struct AuthStatus {
 #[derive(Debug, Clone, Serialize)]
 pub struct UseResult {
     pub auth: AuthStatus,
-    /// devin/Desktop processes still running the old sign-in; restart them.
+    /// devin CLI sessions still running the old sign-in; restart them.
     pub restart_needed: Vec<String>,
+    /// "switched" | "cli_only" | "unavailable" (Desktop absent) |
+    /// "failed: <err>".
+    pub desktop: String,
 }
 
 pub fn now_stamp() -> String {

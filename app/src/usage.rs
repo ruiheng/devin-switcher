@@ -17,6 +17,8 @@ const CACHE_TTL: Duration = Duration::from_secs(60);
 pub struct Usage {
     pub email: String,
     pub name: String,
+    /// `user-<hex>` — needed for Devin Desktop's session record.
+    pub user_id: String,
     pub plan: String,
     pub org_id: Option<String>,
     /// Billing-cycle end, RFC3339.
@@ -171,6 +173,11 @@ pub fn user_status(key: &str, server: &str) -> Result<Usage, String> {
             .unwrap_or("")
             .into(),
         name: us.get("name").and_then(|e| e.as_str()).unwrap_or("").into(),
+        user_id: us
+            .get("userId")
+            .and_then(|e| e.as_str())
+            .unwrap_or("")
+            .into(),
         plan: info
             .get("planName")
             .and_then(|e| e.as_str())

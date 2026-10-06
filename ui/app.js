@@ -70,6 +70,18 @@ const I18N = {
     savedTok: (n) => `Saved ${n}`,
     signedInAs: (n) => `Signed in as ${n}`,
     switchedTo: (w) => `Switched to ${w}`,
+    swScopeCli: "Switch CLI only",
+    swScopeDesktop: "Switch Desktop only",
+    swMore: "More switch options",
+    swToastBoth: (n) => `Switched to ${n} (CLI + Desktop)`,
+    swToastCli: (n) => `Switched to ${n} (CLI only)`,
+    swToastDesktop: (n) => `Switched Devin Desktop to ${n}`,
+    swToastNoDesktop: (n) =>
+      `Switched to ${n} (CLI; Devin Desktop not installed)`,
+    swToastDesktopFail: (n, e) =>
+      `Switched to ${n} (CLI) — Desktop sync failed: ${e}`,
+    swQuitDesktop:
+      "Devin Desktop is running — quit it fully, then switch again",
     restartWarn: (w, ps) =>
       `Switched to ${w}. Restart these to use the new account: ${ps}`,
     launched: (n) => `Launched a parallel devin session as ${n}`,
@@ -136,6 +148,16 @@ const I18N = {
     savedTok: (n) => `已保存 ${n}`,
     signedInAs: (n) => `已登录 ${n}`,
     switchedTo: (w) => `已切换到 ${w}`,
+    swScopeCli: "仅切换 CLI",
+    swScopeDesktop: "仅切换 Desktop",
+    swMore: "更多切换方式",
+    swToastBoth: (n) => `已切换到 ${n}（CLI + Desktop）`,
+    swToastCli: (n) => `已切换到 ${n}（仅 CLI）`,
+    swToastDesktop: (n) => `已把 Devin Desktop 切换到 ${n}`,
+    swToastNoDesktop: (n) => `已切换到 ${n}（CLI；未检测到 Desktop）`,
+    swToastDesktopFail: (n, e) =>
+      `已切换到 ${n}（CLI）——Desktop 同步失败：${e}`,
+    swQuitDesktop: "Devin Desktop 正在运行——请先完全退出再切换",
     restartWarn: (w, ps) => `已切换到 ${w}。重启这些进程后生效：${ps}`,
     launched: (n) => `已用 ${n} 启动并行 devin 会话`,
     runThis: (c) => `在终端中运行：${c}`,
@@ -330,7 +352,7 @@ function renderProfiles(profiles, status, force = false) {
   $("current").classList.toggle("hidden", !!active);
   // Don't clobber an in-progress rename, armed delete, or busy card on
   // the 5s poll — an action's own refresh passes force to bypass this.
-  if (!force && el.querySelector(".rename-in, .danger.armed, .busy"))
+  if (!force && el.querySelector(".rename-in, .danger.armed, .busy, .menu"))
     return;
   if (!profiles.length) {
     el.innerHTML = `<p class="sub empty">${t(
@@ -373,11 +395,35 @@ function renderProfiles(profiles, status, force = false) {
       ${
         p.is_active
           ? ""
-          : `<div class="actions"><button class="use" data-act="use">${t("swUse")}</button><button data-act="par">${t("swPar")}</button></div>`
+          : `<div class="actions"><span class="splitbtn"><button class="use" data-act="use">${t("swUse")}</button><button class="use caret" data-act="usemenu" title="${t("swMore")}">▾</button></span><button data-act="par">${t("swPar")}</button></div>`
       }`;
     const useBtn = card.querySelector('[data-act="use"]');
     if (useBtn)
-      useBtn.onclick = () => pend(card, () => useProfile(p.name));
+      useBtn.onclick = () => pend(card, () => useProfile(p.name, "all"));
+    const menuBtn = card.querySelector('[data-act="usemenu"]');
+    if (menuBtn)
+      menuBtn.onclick = (e) => {
+        e.stopPropagation();
+        const wrap = menuBtn.parentElement;
+        const open = wrap.querySelector(".menu");
+        document.querySelectorAll(".menu").forEach((m) => {
+          if (m !== open) m.remove();
+        });
+        if (open) {
+          open.remove();
+          return;
+        }
+        const menu = document.createElement("div");
+        menu.className = "menu";
+        menu.innerHTML = `<button data-scope="cli">${t("swScopeCli")}</button><button data-scope="desktop">${t("swScopeDesktop")}</button>`;
+        menu.onclick = (ev) => {
+          const scope = ev.target.dataset.scope;
+          if (!scope) return;
+          menu.remove();
+          pend(card, () => useProfile(p.name, scope));
+        };
+        wrap.appendChild(menu);
+      };
     const parBtn = card.querySelector('[data-act="par"]');
     if (parBtn) parBtn.onclick = () => pend(parBtn, () => parallel(p.name));
     card.querySelector('[data-act="ref"]').onclick = (e) =>
@@ -390,20 +436,21 @@ function renderProfiles(profiles, status, force = false) {
     };
     if (!p.is_active) {
       card.ondblclick = (e) => {
-        if (e.target.closest("button, input")) return;
-        pend(card, () => useProfile(p.name));
+        if (e.target.closest("button, input, .menu")) return;
+        pend(card, () => useProfile(p.name, "all"));
       };
     }
     el.appendChild(card);
   }
 }
 
-async function useProfile(name) {
+async function useProfile(name, scope) {
   // Immediate feedback — the backend still does a quota fetch, so the
   // switch itself isn't instant even without the devin CLI spawn.
+  scope = scope || "all";
   toast(t("switching", name));
   try {
-    const r = await invoke("use_profile", { name });
+    const r = await invoke("use_profile", { name, scope });
     const who = name;
     const warn = $("warnBanner");
     if (r.restart_needed && r.restart_needed.length) {
@@ -412,10 +459,17 @@ async function useProfile(name) {
     } else {
       warn.classList.add("hidden");
     }
-    toast(t("switchedTo", who));
+    if (scope === "cli") toast(t("swToastCli", who));
+    else if (scope === "desktop") toast(t("swToastDesktop", who));
+    else if (r.desktop === "switched") toast(t("swToastBoth", who));
+    else if (r.desktop === "unavailable") toast(t("swToastNoDesktop", who));
+    else if ((r.desktop || "").startsWith("failed"))
+      toast(t("swToastDesktopFail", who, r.desktop.slice(8)), true);
+    else toast(t("switchedTo", who));
     refresh(true);
   } catch (e) {
-    toast(String(e), true);
+    const s = String(e);
+    toast(s === "devin_desktop_running" ? t("swQuitDesktop") : s, true);
   }
 }
 
@@ -655,6 +709,12 @@ async function pollLogin() {
     stopLogin();
   }
 }
+
+// Click anywhere outside a card's scope menu closes it.
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".splitbtn"))
+    document.querySelectorAll(".menu").forEach((m) => m.remove());
+});
 
 // Keep quota countdowns ticking — one pass over [data-reset] spans a
 // second. Cheap; re-rendered nodes are picked up on the next tick.

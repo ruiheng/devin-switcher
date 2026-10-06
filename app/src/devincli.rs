@@ -56,6 +56,7 @@ pub fn parse_status(text: &str) -> AuthStatus {
         match k.trim() {
             "Name" => st.name = v,
             "Email" => st.email = v,
+            "User ID" => st.user_id = v,
             "Plan" => st.plan = v,
             "Tier" => st.tier = v,
             _ => {}
