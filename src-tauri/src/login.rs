@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -127,11 +127,32 @@ pub fn credentials_toml(key: &str, server: &str, webapp: &str, api: &str) -> Str
     )
 }
 
-fn read_request_line(stream: &TcpStream) -> Result<String, String> {
+/// Request line + headers in one go. Keep the BufReader alive for the
+/// whole head: dropping it early would swallow header bytes it already
+/// buffered, losing e.g. Accept-Language.
+fn read_request_head(stream: &TcpStream) -> Result<String, String> {
     let mut reader = BufReader::new(stream);
+    let mut head = String::new();
     let mut line = String::new();
     reader.read_line(&mut line).map_err(|e| e.to_string())?;
-    Ok(line)
+    head.push_str(&line);
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {
+                let blank = line.trim_end().is_empty();
+                head.push_str(&line);
+                if blank || head.len() > 16 * 1024 {
+                    break;
+                }
+            }
+            // Slow/split headers: keep whatever arrived — the request
+            // line alone is enough to answer.
+            Err(_) => break,
+        }
+    }
+    Ok(head)
 }
 
 fn query_param(target: &str, key: &str) -> Option<String> {
@@ -165,9 +186,36 @@ fn urldecode(s: &str) -> String {
     out
 }
 
-const DONE_PAGE: &str = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><title>Devin Switch</title><body style=\"font-family:sans-serif;display:grid;place-items:center;min-height:80vh\"><div><h2>Sign-in complete</h2><p>You can close this tab and return to Devin Switch.</p></div>";
+/// Callback pages follow the browser's Accept-Language.
+fn page(status: &str, h2: &str, p: &str) -> String {
+    format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><title>Devin Switch</title><body style=\"font-family:sans-serif;display:grid;place-items:center;min-height:80vh\"><div><h2>{h2}</h2><p>{p}</p></div>")
+}
 
-const ERR_PAGE: &str = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><title>Devin Switch</title><body style=\"font-family:sans-serif;display:grid;place-items:center;min-height:80vh\"><div><h2>Sign-in failed</h2><p>Devin Switch didn't recognize this callback — go back and try again.</p></div>";
+fn pages(zh: bool) -> (String, String) {
+    if zh {
+        (
+            page("200 OK", "登录完成", "可以关闭此标签页，回到 Devin Switch。"),
+            page(
+                "400 Bad Request",
+                "登录失败",
+                "Devin Switch 无法识别这个回调——请回到应用重试。",
+            ),
+        )
+    } else {
+        (
+            page(
+                "200 OK",
+                "Sign-in complete",
+                "You can close this tab and return to Devin Switch.",
+            ),
+            page(
+                "400 Bad Request",
+                "Sign-in failed",
+                "Devin Switch didn't recognize this callback — go back and try again.",
+            ),
+        )
+    }
+}
 
 const NOT_FOUND: &str = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
@@ -306,34 +354,36 @@ fn wait_callback(
 }
 
 fn handle_conn(stream: &mut TcpStream, want_state: &str) -> Conn {
-    let Ok(line) = read_request_line(stream) else {
+    let Ok(head) = read_request_head(stream) else {
         return Conn::Stray;
     };
-    // drain remaining headers best-effort
-    let mut sink = [0u8; 512];
-    let _ = stream.read(&mut sink);
-    let Some(target) = line.split_whitespace().nth(1) else {
+    let Some(target) = head.lines().next().and_then(|l| l.split_whitespace().nth(1)) else {
         return Conn::Stray;
     };
     if !target.starts_with("/callback") {
         let _ = stream.write_all(NOT_FOUND.as_bytes());
         return Conn::Stray;
     }
+    let zh = head
+        .lines()
+        .find(|l| l.to_ascii_lowercase().starts_with("accept-language:"))
+        .is_some_and(|l| l.to_ascii_lowercase().contains("zh"));
+    let (done_page, err_page) = pages(zh);
     let code = query_param(target, "code");
     let state = query_param(target, "state");
     if state.as_deref() != Some(want_state) {
-        let _ = stream.write_all(ERR_PAGE.as_bytes());
+        let _ = stream.write_all(err_page.as_bytes());
         let _ = stream.flush();
         return Conn::Fatal("callback state mismatch".into());
     }
     match code.filter(|c| !c.is_empty()) {
         Some(code) => {
-            let _ = stream.write_all(DONE_PAGE.as_bytes());
+            let _ = stream.write_all(done_page.as_bytes());
             let _ = stream.flush();
             Conn::Code(code)
         }
         None => {
-            let _ = stream.write_all(ERR_PAGE.as_bytes());
+            let _ = stream.write_all(err_page.as_bytes());
             let _ = stream.flush();
             Conn::Fatal("callback carried no code".into())
         }
