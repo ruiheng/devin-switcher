@@ -455,9 +455,11 @@ fn open_terminal(cmdline: &str, cwd: &Path) -> Result<(), String> {
 
 #[cfg(windows)]
 fn open_terminal(cmdline: &str, cwd: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
     Command::new("cmd")
         .args(["/c", "start", "", "cmd", "/k"])
         .arg(format!("cd /d \"{}\" && {}", cwd.display(), cmdline))
+        .creation_flags(0x0800_0000)
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())

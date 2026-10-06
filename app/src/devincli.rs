@@ -4,6 +4,10 @@ use std::process::{Command, Stdio};
 use crate::model::AuthStatus;
 use crate::paths;
 
+/// Spawned console apps must not pop a window when the GUI runs them.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 /// Run `devin` with an optional fake data home (the env override the CLI
 /// itself honors: XDG_DATA_HOME on unix, APPDATA on windows).
 pub fn devin_cmd(home: Option<&Path>, args: &[&str]) -> Result<Command, String> {
@@ -14,6 +18,11 @@ pub fn devin_cmd(home: Option<&Path>, args: &[&str]) -> Result<Command, String> 
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     if let Some(h) = home {
         // Both are set on every platform: the CLI reads whichever applies.
         cmd.env("XDG_DATA_HOME", h).env("APPDATA", h);
