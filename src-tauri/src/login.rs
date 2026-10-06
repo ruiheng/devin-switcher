@@ -218,6 +218,35 @@ pub fn start() -> Result<LoginOffer, String> {
     Ok(LoginOffer { id, url, hint })
 }
 
+/// A manual login round — what `devin auth login --force-manual-token-flow`
+/// does for SSH/remote sessions: the authorize URL carries no redirect_uri,
+/// so after sign-in the page shows a code to paste back instead of hitting
+/// a localhost listener.
+pub struct ManualLogin {
+    pub url: String,
+    verifier: String,
+}
+
+pub fn manual_start() -> ManualLogin {
+    let verifier = b64url(&rand_bytes(32));
+    let challenge = b64url(&Sha256::digest(verifier.as_bytes()));
+    let state = b64url(&rand_bytes(16));
+    let url = format!(
+        "{AUTHORIZE_URL}?state={state}&prompt=select_account&code_challenge={challenge}&code_challenge_method=S256&cli_pkce_marker=1"
+    );
+    ManualLogin { url, verifier }
+}
+
+/// Trade the code the page showed for credentials.toml bytes. The manual
+/// flow registered no redirect_uri, so the exchange sends an empty one.
+pub fn manual_finish(m: &ManualLogin, code: &str) -> Result<Vec<u8>, String> {
+    let code = code.trim();
+    if code.is_empty() {
+        return Err("code is empty".into());
+    }
+    exchange(code, &m.verifier, "")
+}
+
 fn wait_callback(
     listener: TcpListener,
     want_state: &str,

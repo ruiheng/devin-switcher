@@ -9,11 +9,12 @@
 <body>
   <header>
     <h1>Devin Switch</h1>
+    <button id="langBtn" class="lang">中/EN</button>
     <div id="current" class="current">
       <span class="dot" id="currentDot"></span>
       <div class="current-text">
-        <div id="currentTag" class="curtag">CURRENT SIGN-IN</div>
-        <div id="currentLabel">Checking…</div>
+        <div id="currentTag" class="curtag" data-i18n="currentTag">CURRENT SIGN-IN</div>
+        <div id="currentLabel">…</div>
         <div id="currentSub" class="sub"></div>
         <div id="currentQuota" class="quota"></div>
       </div>
@@ -23,57 +24,57 @@
   <main>
     <div id="warnBanner" class="warn hidden"></div>
     <section id="profiles" class="profiles"></section>
-    <button id="addBtn" class="add">+ Add account</button>
+    <button id="addBtn" class="add" data-i18n="addAccount">+ Add account</button>
   </main>
 
   <!-- Add account sheet -->
   <div id="sheet" class="sheet hidden">
     <div class="sheet-card">
-      <h2>Add account</h2>
+      <h2 data-i18n="addTitle">Add account</h2>
 
       <div class="tabs">
-        <button class="tab active" data-tab="login">Browser sign-in</button>
-        <button class="tab" data-tab="current">Save current</button>
-        <button class="tab" data-tab="token">Paste token</button>
+        <button class="tab active" data-tab="login" data-i18n="tabLogin">Browser sign-in</button>
+        <button class="tab" data-tab="current" data-i18n="tabCurrent">Save current</button>
+        <button class="tab" data-tab="token" data-i18n="tabToken">Paste token</button>
       </div>
 
       <div class="tabpane" id="tab-login">
-        <p class="hint">Sign in with a browser. The page asks which account to
-        use — your existing devin.ai session won't auto-apply. You may open
-        the link in any browser or an incognito window.</p>
-        <p class="hint">The new profile is named after the account's email —
-        rename it from the card afterwards if you like.</p>
-        <button id="startLogin" class="primary">Start sign-in</button>
+        <p class="hint" data-i18n="loginHint">Sign in with a browser. The page asks which
+        account to use — your existing devin.ai session won't auto-apply.
+        Open the link in any browser or an incognito window.</p>
+        <p class="hint" data-i18n="loginName">The profile is named after the account's
+        email — rename it from the card afterwards.</p>
+        <button id="startLogin" class="primary" data-i18n="startLogin">Start sign-in</button>
         <div id="loginWait" class="hidden">
-          <p class="wait-text">Waiting for sign-in…</p>
+          <p class="wait-text" data-i18n="waiting">Waiting for sign-in…</p>
           <div class="linkrow">
             <input id="loginUrl" readonly>
-            <button id="copyUrl">Copy</button>
-            <button id="openUrl">Open</button>
+            <button id="copyUrl" data-i18n="copy">Copy</button>
+            <button id="openUrl" data-i18n="open">Open</button>
           </div>
           <details class="manual">
-            <summary>Or run in a terminal instead</summary>
+            <summary data-i18n="terminalInstead">Or run in a terminal instead</summary>
             <code id="loginHint"></code>
           </details>
-          <button id="cancelLogin" class="ghost">Cancel</button>
+          <button id="cancelLogin" class="ghost" data-i18n="cancel">Cancel</button>
         </div>
       </div>
 
       <div class="tabpane hidden" id="tab-current">
-        <p class="hint">Save the account the devin CLI is signed in as right
-        now. It's named after the account's email automatically.</p>
-        <button id="saveCurrent" class="primary">Save current sign-in</button>
+        <p class="hint" data-i18n="currentHint">Save the account the devin CLI is signed
+        in as right now. It's named after the account's email automatically.</p>
+        <button id="saveCurrent" class="primary" data-i18n="saveCurrent">Save current sign-in</button>
       </div>
 
       <div class="tabpane hidden" id="tab-token">
-        <p class="hint">Open <code>app.devin.ai/auth/cli/token</code> in a
-        browser where the account is signed in — the page shows a
-        <code>devin-session-token$…</code>. Paste it below.</p>
+        <p class="hint" data-i18n="tokenHint">Paste a session token
+        (devin-session-token$…) — e.g. the windsurf_api_key from an
+        existing credentials.toml.</p>
         <div class="field">
           <label>Token</label>
           <input id="tokenValue" placeholder="devin-session-token$…" autocomplete="off">
         </div>
-        <button id="saveToken" class="primary">Save token</button>
+        <button id="saveToken" class="primary" data-i18n="saveToken">Save token</button>
       </div>
 
       <button id="closeSheet" class="close">✕</button>

@@ -7,15 +7,153 @@ const esc = (s) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
   );
 
+// ---------- i18n ----------
+
+const I18N = {
+  en: {
+    currentTag: "CURRENT SIGN-IN",
+    checking: "Checking…",
+    notSignedIn: "Not signed in",
+    cliNotFound: "devin CLI not found",
+    signedIn: "Signed in",
+    addAccount: "+ Add account",
+    addTitle: "Add account",
+    tabLogin: "Browser sign-in",
+    tabCurrent: "Save current",
+    tabToken: "Paste token",
+    loginHint:
+      "Sign in with a browser. The page asks which account to use — your existing devin.ai session won't auto-apply. Open the link in any browser or an incognito window.",
+    loginName:
+      "The profile is named after the account's email — rename it from the card afterwards.",
+    startLogin: "Start sign-in",
+    waiting: "Waiting for sign-in…",
+    copy: "Copy",
+    open: "Open",
+    terminalInstead: "Or run in a terminal instead",
+    cancel: "Cancel",
+    currentHint:
+      "Save the account the devin CLI is signed in as right now. It's named after the account's email automatically.",
+    saveCurrent: "Save current sign-in",
+    tokenHint:
+      "Paste a session token (devin-session-token$…) — e.g. the windsurf_api_key from an existing credentials.toml.",
+    saveToken: "Save token",
+    noProfiles: "No profiles yet.<br>Add your first account below.",
+    unknown: "unknown account",
+    swUse: "Switch",
+    swPar: "Run in parallel",
+    swRen: "Rename",
+    swRef: "Refresh quota",
+    swDel: "Delete",
+    active: "ACTIVE",
+    daily: "Daily",
+    weekly: "Weekly",
+    resets: "resets",
+    used: "used",
+    overage: "overage",
+    planEnds: "plan ends",
+    savedAs: (n) => `Saved as ${n}`,
+    savedTok: (n) => `Saved ${n}`,
+    signedInAs: (n) => `Signed in as ${n}`,
+    switchedTo: (w) => `Switched to ${w}`,
+    restartWarn: (w, ps) =>
+      `Switched to ${w}. Restart these to use the new account: ${ps}`,
+    launched: (n) => `Launched a parallel devin session as ${n}`,
+    runThis: (c) => `Run this in a terminal: ${c}`,
+    linkCopied: "Link copied — open it in any browser or incognito window",
+    tokenReq: "Token required",
+    delConfirm: (n) =>
+      `Delete profile "${n}"? Its saved credentials are removed.`,
+    renamePrompt: "Rename profile",
+  },
+  zh: {
+    currentTag: "当前登录",
+    checking: "检查中…",
+    notSignedIn: "未登录",
+    cliNotFound: "找不到 devin CLI",
+    signedIn: "已登录",
+    addAccount: "+ 添加账号",
+    addTitle: "添加账号",
+    tabLogin: "浏览器登录",
+    tabCurrent: "保存当前",
+    tabToken: "粘贴 token",
+    loginHint:
+      "在浏览器中登录。页面会强制让你选账号——已登录的 devin.ai 会话不会被自动复用。链接可以在任何浏览器或隐身窗口打开。",
+    loginName: "profile 会用账号邮箱自动命名，之后可在卡片上改名。",
+    startLogin: "开始登录",
+    waiting: "等待登录…",
+    copy: "复制",
+    open: "打开",
+    terminalInstead: "或者在终端里运行",
+    cancel: "取消",
+    currentHint:
+      "保存 devin CLI 当前登录的账号。profile 会按邮箱自动命名。",
+    saveCurrent: "保存当前登录",
+    tokenHint:
+      "粘贴 session token（devin-session-token$…）——例如已有 credentials.toml 里的 windsurf_api_key。",
+    saveToken: "保存 token",
+    noProfiles: "还没有 profile。<br>在下方添加第一个账号。",
+    unknown: "未知账号",
+    swUse: "切换",
+    swPar: "并行运行",
+    swRen: "改名",
+    swRef: "刷新额度",
+    swDel: "删除",
+    active: "使用中",
+    daily: "当天",
+    weekly: "本周",
+    resets: "重置",
+    used: "已用",
+    overage: "超额余额",
+    planEnds: "周期结束",
+    savedAs: (n) => `已保存为 ${n}`,
+    savedTok: (n) => `已保存 ${n}`,
+    signedInAs: (n) => `已登录 ${n}`,
+    switchedTo: (w) => `已切换到 ${w}`,
+    restartWarn: (w, ps) => `已切换到 ${w}。重启这些进程后生效：${ps}`,
+    launched: (n) => `已用 ${n} 启动并行 devin 会话`,
+    runThis: (c) => `在终端中运行：${c}`,
+    linkCopied: "链接已复制——可在任何浏览器或隐身窗口打开",
+    tokenReq: "需要 token",
+    delConfirm: (n) => `删除 profile「${n}」？保存的凭据将被移除。`,
+    renamePrompt: "重命名 profile",
+  },
+};
+
+let lang =
+  localStorage.getItem("dsw-lang") ||
+  ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
+
+const t = (k, ...a) => {
+  const v = I18N[lang][k] ?? I18N.en[k] ?? k;
+  return typeof v === "function" ? v(...a) : v;
+};
+
+function applyI18n() {
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  $("langBtn").textContent = lang === "zh" ? "EN" : "中";
+  refresh();
+}
+
+$("langBtn").onclick = () => {
+  lang = lang === "zh" ? "en" : "zh";
+  localStorage.setItem("dsw-lang", lang);
+  applyI18n();
+};
+
+// ---------- app ----------
+
 let loginId = null;
 let loginTimer = null;
 
 function toast(msg, isErr = false) {
-  const t = $("toast");
-  t.textContent = msg;
-  t.className = "toast" + (isErr ? " err" : "");
-  clearTimeout(t._h);
-  t._h = setTimeout(() => t.classList.add("hidden"), 4000);
+  const t2 = $("toast");
+  t2.textContent = msg;
+  t2.className = "toast" + (isErr ? " err" : "");
+  clearTimeout(t2._h);
+  t2._h = setTimeout(() => t2.classList.add("hidden"), 4000);
 }
 
 async function refresh() {
@@ -36,23 +174,20 @@ function renderStatus(s) {
   if (s.auth && s.auth.logged_in) {
     dot.classList.add("on");
     $("currentLabel").textContent =
-      s.auth.name || s.auth.email || "Signed in";
+      s.auth.name || s.auth.email || t("signedIn");
     $("currentSub").textContent = [s.auth.email, s.auth.plan || s.auth.tier]
       .filter(Boolean)
       .join(" · ");
   } else {
     dot.classList.remove("on");
-    $("currentLabel").textContent = "Not signed in";
-    $("currentSub").textContent = s.devin_installed
-      ? ""
-      : "devin CLI not found";
+    $("currentLabel").textContent = t("notSignedIn");
+    $("currentSub").textContent = s.devin_installed ? "" : t("cliNotFound");
   }
   $("currentQuota").innerHTML = quotaHtml(s.usage);
 }
 
-// Render a Usage object as labeled progress bars. Percent fill = quota
-// remaining for daily/weekly, quota used for ACU. Green → amber → red as
-// it drains.
+// Usage → labeled progress bars. Fill = % remaining for daily/weekly,
+// % remaining for ACU. Green → amber → red as it drains.
 function quotaHtml(u) {
   if (!u) return "";
   const bar = (pct) => {
@@ -71,20 +206,24 @@ function quotaHtml(u) {
   if (u.daily_left != null) {
     rows.push(
       row(
-        "Daily",
+        t("daily"),
         u.daily_left,
         `${Math.round(u.daily_left)}%` +
-          (u.daily_reset_unix ? ` · resets ${fmtDate(u.daily_reset_unix)}` : "")
+          (u.daily_reset_unix
+            ? ` · ${t("resets")} ${fmtDate(u.daily_reset_unix)}`
+            : "")
       )
     );
   }
   if (u.weekly_left != null) {
     rows.push(
       row(
-        "Weekly",
+        t("weekly"),
         u.weekly_left,
         `${Math.round(u.weekly_left)}%` +
-          (u.weekly_reset_unix ? ` · resets ${fmtDate(u.weekly_reset_unix)}` : "")
+          (u.weekly_reset_unix
+            ? ` · ${t("resets")} ${fmtDate(u.weekly_reset_unix)}`
+            : "")
       )
     );
   }
@@ -92,14 +231,14 @@ function quotaHtml(u) {
     const used = u.acu_used || 0;
     const leftPct = ((u.acu_limit - used) / u.acu_limit) * 100;
     rows.push(
-      row("ACU", leftPct, `${r2(used)} / ${r2(u.acu_limit)} used`)
+      row("ACU", leftPct, `${r2(used)} / ${r2(u.acu_limit)} ${t("used")}`)
     );
   }
   const foot = [];
   if (u.overage_micros != null && u.overage_micros > 0) {
-    foot.push(`overage +$${(u.overage_micros / 1e6).toFixed(2)}`);
+    foot.push(`${t("overage")} +$${(u.overage_micros / 1e6).toFixed(2)}`);
   }
-  if (u.plan_end) foot.push(`plan ends ${esc(u.plan_end.slice(0, 10))}`);
+  if (u.plan_end) foot.push(`${t("planEnds")} ${esc(u.plan_end.slice(0, 10))}`);
   if (foot.length) rows.push(`<div class="qfoot">${foot.join(" · ")}</div>`);
   return rows.join("");
 }
@@ -113,10 +252,8 @@ function renderProfiles(profiles) {
   // the ACTIVE badge already says it — hide the banner instead.
   const active = profiles.find((p) => p.is_active);
   $("current").classList.toggle("hidden", !!active);
-  $("currentTag").textContent = "CURRENT SIGN-IN";
   if (!profiles.length) {
-    el.innerHTML =
-      '<p class="sub" style="text-align:center;margin:24px 0">No profiles yet.<br>Add your first account below.</p>';
+    el.innerHTML = `<p class="sub" style="text-align:center;margin:24px 0">${t("noProfiles")}</p>`;
     return;
   }
   el.innerHTML = "";
@@ -126,21 +263,21 @@ function renderProfiles(profiles) {
     card.innerHTML = `
       <div class="top">
         <span class="name">${esc(p.name)}</span>
-        ${p.is_active ? '<span class="badge">ACTIVE</span>' : ""}
+        ${p.is_active ? `<span class="badge">${t("active")}</span>` : ""}
       </div>
       <div class="meta">${esc(
-        [p.email || p.display_name || "unknown account", p.plan]
+        [p.email || p.display_name || t("unknown"), p.plan]
           .filter(Boolean)
           .join(" · ")
       )}</div>
       ${p.usage ? `<div class="quota">${quotaHtml(p.usage)}</div>` : ""}
       ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
       <div class="actions">
-        <button class="use" data-act="use">Switch</button>
-        <button data-act="par">Run in parallel</button>
-        <button data-act="ren" title="Rename profile">Rename</button>
-        <button data-act="ref" title="Refresh quota">↻</button>
-        <button class="danger" data-act="del">Delete</button>
+        <button class="use" data-act="use">${t("swUse")}</button>
+        <button data-act="par">${t("swPar")}</button>
+        <button data-act="ren">${t("swRen")}</button>
+        <button data-act="ref" title="${t("swRef")}">↻</button>
+        <button class="danger" data-act="del">${t("swDel")}</button>
       </div>`;
     card.querySelector('[data-act="use"]').onclick = () => useProfile(p.name);
     card.querySelector('[data-act="par"]').onclick = () => parallel(p.name);
@@ -159,16 +296,12 @@ async function useProfile(name) {
       : "account";
     const warn = $("warnBanner");
     if (r.restart_needed && r.restart_needed.length) {
-      warn.textContent =
-        "Switched to " +
-        who +
-        ". Restart these to use the new account: " +
-        r.restart_needed.join(", ");
+      warn.textContent = t("restartWarn", who, r.restart_needed.join(", "));
       warn.classList.remove("hidden");
     } else {
       warn.classList.add("hidden");
     }
-    toast("Switched to " + who);
+    toast(t("switchedTo", who));
     refresh();
   } catch (e) {
     toast(String(e), true);
@@ -179,9 +312,9 @@ async function parallel(name) {
   try {
     const r = await invoke("launch_parallel", { name, cwd: null });
     if (r.launched) {
-      toast("Launched a parallel devin session as " + name);
+      toast(t("launched", name));
     } else {
-      toast("Run this in a terminal: " + r.command);
+      toast(t("runThis", r.command));
     }
   } catch (e) {
     toast(String(e), true);
@@ -189,7 +322,7 @@ async function parallel(name) {
 }
 
 async function rename(name) {
-  const to = prompt("Rename profile", name);
+  const to = prompt(t("renamePrompt"), name);
   if (to == null || to.trim() === "" || to.trim() === name) return;
   try {
     await invoke("rename_profile", { from: name, to: to.trim() });
@@ -209,8 +342,7 @@ async function refreshUsage(name) {
 }
 
 async function del(name) {
-  if (!confirm(`Delete profile "${name}"? Its saved credentials are removed.`))
-    return;
+  if (!confirm(t("delConfirm", name))) return;
   try {
     await invoke("delete_profile", { name });
     refresh();
@@ -229,21 +361,21 @@ function closeSheet() {
   stopLogin();
 }
 
-for (const t of document.querySelectorAll(".tab")) {
-  t.onclick = () => {
+for (const t2 of document.querySelectorAll(".tab")) {
+  t2.onclick = () => {
     document
       .querySelectorAll(".tab")
-      .forEach((x) => x.classList.toggle("active", x === t));
+      .forEach((x) => x.classList.toggle("active", x === t2));
     for (const pane of document.querySelectorAll(".tabpane"))
       pane.classList.add("hidden");
-    $("tab-" + t.dataset.tab).classList.remove("hidden");
+    $("tab-" + t2.dataset.tab).classList.remove("hidden");
   };
 }
 
 $("saveCurrent").onclick = async () => {
   try {
     const p = await invoke("save_current", { name: "", note: "" });
-    toast("Saved as " + p.name);
+    toast(t("savedAs", p.name));
     closeSheet();
     refresh();
   } catch (e) {
@@ -253,10 +385,10 @@ $("saveCurrent").onclick = async () => {
 
 $("saveToken").onclick = async () => {
   const token = $("tokenValue").value.trim();
-  if (!token) return toast("Token required", true);
+  if (!token) return toast(t("tokenReq"), true);
   try {
     const p = await invoke("add_token", { name: "", token });
-    toast("Saved " + (p.email || p.name));
+    toast(t("savedTok", p.email || p.name));
     closeSheet();
     refresh();
   } catch (e) {
@@ -286,7 +418,7 @@ $("openUrl").onclick = () => {
 $("copyUrl").onclick = async () => {
   try {
     await navigator.clipboard.writeText($("loginUrl").value);
-    toast("Link copied — open it in any browser or incognito window");
+    toast(t("linkCopied"));
   } catch {
     $("loginUrl").select();
   }
@@ -309,7 +441,7 @@ async function pollLogin() {
   try {
     const r = await invoke("poll_login", { id: loginId, name: "", note: "" });
     if (r.kind === "done") {
-      toast("Signed in as " + (r.profile.email || r.profile.name));
+      toast(t("signedInAs", r.profile.email || r.profile.name));
       stopLogin();
       closeSheet();
       refresh();
@@ -321,5 +453,5 @@ async function pollLogin() {
   }
 }
 
-refresh();
+applyI18n();
 setInterval(refresh, 5000);

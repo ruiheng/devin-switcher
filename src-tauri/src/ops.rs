@@ -217,6 +217,12 @@ pub fn add_token(name: &str, token: &str) -> Result<ProfileInfo, String> {
     save_account(&creds, u, None, name, "")
 }
 
+/// Save credentials produced out-of-band (manual code exchange in the
+/// CLI). Identity + quota are fetched as usual.
+pub fn save_creds(creds: &[u8], name: &str) -> Result<ProfileInfo, String> {
+    save_account(creds, account_of(creds), None, name, "")
+}
+
 /// Switch the CLI (and thereby Desktop) to a stored profile.
 pub fn use_profile(name: &str) -> Result<UseResult, String> {
     let name = store::sanitize_name(name)?;

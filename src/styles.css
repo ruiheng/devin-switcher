@@ -28,6 +28,14 @@ header {
   border-bottom: 1px solid var(--border);
 }
 h1 { font-size: 16px; margin: 0 0 10px; font-weight: 600; letter-spacing: .2px; }
+header { position: relative; }
+.lang {
+  position: absolute; top: 14px; right: 14px;
+  font-size: 11px; padding: 3px 8px; border-radius: 6px;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--sub); cursor: pointer;
+}
+.lang:hover { color: var(--text); border-color: var(--sub); }
 
 .current {
   display: flex; align-items: center; gap: 10px;

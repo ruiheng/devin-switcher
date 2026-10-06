@@ -15,6 +15,7 @@
 use std::io::Write;
 use std::process::ExitCode;
 
+use devin_switch_lib::login;
 use devin_switch_lib::model::ProfileInfo;
 use devin_switch_lib::ops;
 use devin_switch_lib::store;
@@ -218,14 +219,16 @@ fn cmd_list() -> Result<(), String> {
     Ok(())
 }
 
-/// Interactive login = paste a session token (hidden input). The token
-/// page is the CLI's own manual-flow page (`--force-manual-token-flow`
-/// opens it), made for SSH sessions where localhost callback can't run.
-/// On unix the terminal echo is disabled while reading.
+/// Interactive login — the CLI's own manual flow (`devin auth login
+/// --force-manual-token-flow`): our PKCE URL opens in any browser on any
+/// machine, the page shows a code, paste it back here and we exchange it.
+/// If the page hands back a devin-session-token instead, we take that too.
+/// Terminal echo is disabled while reading on unix.
 fn cmd_login(name: &str) -> Result<(), String> {
-    eprintln!("1. open in a browser where the Devin account is (or will be) signed in:");
-    eprintln!("\n     https://app.devin.ai/auth/cli/token\n");
-    eprintln!("2. sign in — the page shows a devin-session-token$…\n");
+    let m = login::manual_start();
+    eprintln!("1. open this URL in any browser (it asks which account to use):");
+    eprintln!("\n     {}\n", m.url);
+    eprintln!("2. sign in — the page shows a code\n");
     eprintln!("3. paste it here (input hidden):");
     let mut tok = String::new();
     #[cfg(unix)]
@@ -244,8 +247,19 @@ fn cmd_login(name: &str) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     let _ = std::io::stdout().flush();
-    ops::add_token(name, tok.trim()).map(|p| {
-        println!("saved");
-        show_profile(&p);
-    })
+    let input = tok.trim();
+    if input.is_empty() {
+        return Err("nothing pasted".into());
+    }
+    // A session token saves directly; a code trades through the PKCE
+    // exchange first.
+    let p = if input.starts_with("devin-session-token") {
+        ops::add_token(name, input)?
+    } else {
+        let creds = login::manual_finish(&m, input)?;
+        ops::save_creds(&creds, name)?
+    };
+    println!("saved");
+    show_profile(&p);
+    Ok(())
 }
