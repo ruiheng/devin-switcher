@@ -40,6 +40,14 @@ h1 { font-size: 16px; margin: 0 0 10px; font-weight: 600; letter-spacing: .2px; 
 #currentLabel { font-weight: 600; }
 .sub { color: var(--sub); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.quota { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
+.quota .q {
+  font-size: 11px; padding: 2px 8px; border-radius: 12px;
+  background: rgba(91,108,255,.12); color: #9aa4ff;
+  border: 1px solid rgba(91,108,255,.3); white-space: nowrap;
+}
+.quota .q.dim { background: transparent; color: var(--sub); border-color: var(--border); }
+
 main { padding: 14px 18px; overflow-y: auto; flex: 1; }
 
 .warn {

@@ -48,7 +48,47 @@ function renderStatus(s) {
       ? ""
       : "devin CLI not found";
   }
+  $("currentQuota").innerHTML = quotaText(s.usage);
 }
+
+// Render a Usage object as compact quota chips: weekly/daily % left with
+// reset dates, ACU used/limit, overage balance, plan end.
+function quotaText(u) {
+  if (!u) return "";
+  const parts = [];
+  const fmtDate = (unix) => {
+    const d = new Date(unix * 1000);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+  if (u.daily_left != null) {
+    parts.push(
+      `<span class="q">Daily ${u.daily_left}% left` +
+        (u.daily_reset_unix ? ` · resets ${fmtDate(u.daily_reset_unix)}` : "") +
+        `</span>`
+    );
+  }
+  if (u.weekly_left != null) {
+    parts.push(
+      `<span class="q">Weekly ${u.weekly_left}% left` +
+        (u.weekly_reset_unix ? ` · resets ${fmtDate(u.weekly_reset_unix)}` : "") +
+        `</span>`
+    );
+  }
+  if (u.acu_limit != null && u.acu_limit > 0) {
+    parts.push(
+      `<span class="q">${r2(u.acu_used || 0)} / ${r2(u.acu_limit)} ACU</span>`
+    );
+  }
+  if (u.overage_micros != null && u.overage_micros > 0) {
+    parts.push(`<span class="q">+$${(u.overage_micros / 1e6).toFixed(2)}</span>`);
+  }
+  if (u.plan_end) {
+    parts.push(`<span class="q dim">cycle ends ${esc(u.plan_end.slice(0, 10))}</span>`);
+  }
+  return parts.join(" ");
+}
+
+const r2 = (f) => Math.round(f * 100) / 100;
 
 function renderProfiles(profiles) {
   const el = $("profiles");
@@ -71,14 +111,17 @@ function renderProfiles(profiles) {
           .filter(Boolean)
           .join(" · ")
       )}</div>
+      ${p.usage ? `<div class="quota">${quotaText(p.usage)}</div>` : ""}
       ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
       <div class="actions">
         <button class="use" data-act="use">Switch</button>
         <button data-act="par">Run in parallel</button>
+        <button data-act="ref" title="Refresh quota">↻</button>
         <button class="danger" data-act="del">Delete</button>
       </div>`;
     card.querySelector('[data-act="use"]').onclick = () => useProfile(p.name);
     card.querySelector('[data-act="par"]').onclick = () => parallel(p.name);
+    card.querySelector('[data-act="ref"]').onclick = () => refreshUsage(p.name);
     card.querySelector('[data-act="del"]').onclick = () => del(p.name);
     el.appendChild(card);
   }
@@ -116,6 +159,15 @@ async function parallel(name) {
     } else {
       toast("Run this in a terminal: " + r.command);
     }
+  } catch (e) {
+    toast(String(e), true);
+  }
+}
+
+async function refreshUsage(name) {
+  try {
+    await invoke("refresh_usage", { name });
+    refresh();
   } catch (e) {
     toast(String(e), true);
   }

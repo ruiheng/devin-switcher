@@ -5,6 +5,7 @@ mod model;
 mod ops;
 mod paths;
 mod store;
+mod usage;
 
 use model::{ProfileInfo, UseResult};
 use ops::{LoginOutcome, ParallelLaunch, Status};
@@ -32,6 +33,11 @@ fn delete_profile(name: String) -> Result<(), String> {
 #[tauri::command]
 fn use_profile(name: String) -> Result<UseResult, String> {
     ops::use_profile(&name)
+}
+
+#[tauri::command]
+fn refresh_usage(name: String) -> Result<ProfileInfo, String> {
+    ops::refresh_usage(&name)
 }
 
 #[tauri::command]
@@ -70,6 +76,7 @@ pub fn run() {
             save_current,
             delete_profile,
             use_profile,
+            refresh_usage,
             start_login,
             poll_login,
             cancel_login,

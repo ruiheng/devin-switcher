@@ -168,10 +168,7 @@ pub fn start() -> Result<LoginOffer, String> {
 
     let listener =
         TcpListener::bind("127.0.0.1:0").map_err(|e| format!("callback listener: {e}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| e.to_string())?
-        .port();
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let redirect = format!("http://127.0.0.1:{port}/callback");
 
     let verifier = b64url(&rand_bytes(32));
@@ -200,21 +197,22 @@ pub fn start() -> Result<LoginOffer, String> {
         });
     }
 
-    sessions()
-        .get_or_insert_with(HashMap::new)
-        .insert(id, Session {
+    sessions().get_or_insert_with(HashMap::new).insert(
+        id,
+        Session {
             home: home.clone(),
             created: Instant::now(),
             rx,
-        });
+        },
+    );
 
     let hint = if cfg!(windows) {
-        format!("set APPDATA={} && set XDG_DATA_HOME={0} && devin auth login", home.display())
-    } else {
         format!(
-            "XDG_DATA_HOME=\"{}\" devin auth login",
+            "set APPDATA={} && set XDG_DATA_HOME={0} && devin auth login",
             home.display()
         )
+    } else {
+        format!("XDG_DATA_HOME=\"{}\" devin auth login", home.display())
     };
 
     Ok(LoginOffer { id, url, hint })
@@ -225,21 +223,15 @@ fn wait_callback(
     want_state: &str,
     timeout: Duration,
 ) -> Result<String, String> {
-    listener
-        .set_nonblocking(false)
-        .ok();
+    listener.set_nonblocking(false).ok();
     // Accept with a deadline: poll via incoming() is blocking, so use a
     // short read timeout loop instead.
-    listener
-        .set_nonblocking(true)
-        .map_err(|e| e.to_string())?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let deadline = Instant::now() + timeout;
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .ok();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
                 return handle_conn(&mut stream, want_state);
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -324,10 +316,7 @@ pub fn poll(id: u64) -> Result<PollState, String> {
 }
 
 pub fn cancel(id: u64) {
-    if let Some(sess) = sessions()
-        .get_or_insert_with(HashMap::new)
-        .remove(&id)
-    {
+    if let Some(sess) = sessions().get_or_insert_with(HashMap::new).remove(&id) {
         let _ = std::fs::remove_dir_all(&sess.home);
     }
 }

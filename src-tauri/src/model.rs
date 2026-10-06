@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::usage::Usage;
+
 /// Per-profile metadata kept beside credentials.toml in the vault.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -11,6 +13,9 @@ pub struct Meta {
     pub org_id: Option<String>,
     pub note: String,
     pub created_at: String,
+    /// Cached GetUserStatus quota snapshot + when it was taken (unix secs).
+    pub usage: Option<Usage>,
+    pub usage_at: i64,
 }
 
 /// A profile as the frontend sees it.
@@ -51,7 +56,14 @@ pub fn now_stamp() -> String {
     let days = secs / 86400;
     let rem = secs % 86400;
     let (y, m, d) = civil_from_days(days as i64);
-    format!("{:04}-{:02}-{:02} {:02}:{:02}Z", y, m, d, rem / 3600, (rem % 3600) / 60)
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}Z",
+        y,
+        m,
+        d,
+        rem / 3600,
+        (rem % 3600) / 60
+    )
 }
 
 fn civil_from_days(z: i64) -> (i64, u32, u32) {

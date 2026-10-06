@@ -80,7 +80,10 @@ fn meta_of(dir: &Path) -> Meta {
 fn info(name: &str) -> ProfileInfo {
     let dir = paths::profile_dir(name);
     let meta = meta_of(&dir);
-    let active = match (fs::read(creds_file(&dir)), fs::read(paths::credentials_path())) {
+    let active = match (
+        fs::read(creds_file(&dir)),
+        fs::read(paths::credentials_path()),
+    ) {
         (Ok(saved), Ok(current)) => saved == current,
         _ => false,
     };

@@ -7,9 +7,8 @@ use crate::paths;
 /// Run `devin` with an optional fake data home (the env override the CLI
 /// itself honors: XDG_DATA_HOME on unix, APPDATA on windows).
 pub fn devin_cmd(home: Option<&Path>, args: &[&str]) -> Result<Command, String> {
-    let bin = paths::devin_bin().ok_or(
-        "devin CLI not found on PATH or ~/.local/bin — install Devin first",
-    )?;
+    let bin = paths::devin_bin()
+        .ok_or("devin CLI not found on PATH or ~/.local/bin — install Devin first")?;
     let mut cmd = Command::new(bin);
     cmd.args(args)
         .stdin(Stdio::null())
@@ -41,7 +40,9 @@ pub fn parse_status(text: &str) -> AuthStatus {
     }
     for line in text.lines() {
         let line = line.trim();
-        let Some((k, v)) = line.split_once(':') else { continue };
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
         let v = v.trim().to_string();
         match k.trim() {
             "Name" => st.name = v,

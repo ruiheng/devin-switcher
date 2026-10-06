@@ -10,21 +10,53 @@ use crate::login::{self, PollState};
 use crate::model::{now_stamp, AuthStatus, Meta, ProfileInfo, UseResult};
 use crate::paths;
 use crate::store;
+use crate::usage::{self, Usage};
 
 #[derive(Debug, Serialize)]
 pub struct Status {
     pub auth: AuthStatus,
+    pub usage: Option<Usage>,
     pub running: Vec<String>,
     pub devin_installed: bool,
     pub credentials_path: String,
 }
 
 pub fn status() -> Status {
+    let usage = fs::read(paths::credentials_path())
+        .ok()
+        .and_then(|c| usage::user_status_cached(&c).ok());
     Status {
         auth: devincli::auth_status(None).unwrap_or_default(),
+        usage,
         running: running_devin_processes(),
         devin_installed: paths::devin_bin().is_some(),
         credentials_path: paths::credentials_path().display().to_string(),
+    }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Identity+quota for a credentials blob; empty Usage when unreachable.
+fn account_of(creds: &[u8]) -> Usage {
+    usage::user_status_cached(creds).unwrap_or_default()
+}
+
+fn meta_from(u: Usage, org: Option<String>, note: &str) -> Meta {
+    let ok = !u.email.is_empty() || !u.plan.is_empty();
+    Meta {
+        email: u.email.clone(),
+        display_name: u.name.clone(),
+        plan: u.plan.clone(),
+        org_id: u.org_id.clone().or(org),
+        note: note.to_string(),
+        created_at: now_stamp(),
+        usage: ok.then_some(u),
+        usage_at: if ok { unix_now() } else { 0 },
     }
 }
 
@@ -50,8 +82,7 @@ pub fn running_devin_processes() -> Vec<String> {
         #[cfg(unix)]
         {
             let isolated = p.environ().iter().any(|e| {
-                e.starts_with("XDG_DATA_HOME=")
-                    && e.contains(&run_root.display().to_string())
+                e.starts_with("XDG_DATA_HOME=") && e.contains(&run_root.display().to_string())
             });
             if isolated {
                 continue;
@@ -60,13 +91,7 @@ pub fn running_devin_processes() -> Vec<String> {
         *seen.entry(p.name().to_string()).or_default() += 1;
     }
     seen.into_iter()
-        .map(|(n, c)| {
-            if c > 1 {
-                format!("{n} ×{c}")
-            } else {
-                n
-            }
-        })
+        .map(|(n, c)| if c > 1 { format!("{n} ×{c}") } else { n })
         .collect()
 }
 
@@ -74,18 +99,10 @@ pub fn running_devin_processes() -> Vec<String> {
 pub fn save_current(name: &str, note: &str) -> Result<ProfileInfo, String> {
     let creds =
         fs::read(paths::credentials_path()).map_err(|_| "Devin isn't signed in".to_string())?;
-    let auth = devincli::auth_status(None).unwrap_or_default();
     store::save(
         name,
         &creds,
-        &Meta {
-            email: auth.email,
-            display_name: auth.name,
-            plan: auth.plan,
-            org_id: config::current_org_id(),
-            note: note.to_string(),
-            created_at: now_stamp(),
-        },
+        &meta_from(account_of(&creds), config::current_org_id(), note),
     )
 }
 
@@ -95,20 +112,7 @@ pub fn finish_login(id: u64, name: &str, note: &str) -> Result<LoginOutcome, Str
         PollState::Waiting => Ok(LoginOutcome::Waiting),
         PollState::Failed { error } => Err(error),
         PollState::GotCreds { creds, home } => {
-            let res = stage_creds(&home, &creds).and_then(|auth| {
-                store::save(
-                    name,
-                    &creds,
-                    &Meta {
-                        email: auth.email,
-                        display_name: auth.name,
-                        plan: auth.plan,
-                        org_id: None, // resolved on first real use
-                        note: note.to_string(),
-                        created_at: now_stamp(),
-                    },
-                )
-            });
+            let res = store::save(name, &creds, &meta_from(account_of(&creds), None, note));
             login::cleanup_home(&home);
             res.map(|profile| LoginOutcome::Done { profile })
         }
@@ -122,18 +126,8 @@ pub enum LoginOutcome {
     Done { profile: ProfileInfo },
 }
 
-/// Place credentials inside a fake home and ask the CLI who signed in.
-fn stage_creds(home: &Path, creds: &[u8]) -> Result<AuthStatus, String> {
-    let creds_path = home.join("devin").join("credentials.toml");
-    if fs::read(&creds_path).ok().as_deref() != Some(creds) {
-        fs::create_dir_all(creds_path.parent().unwrap()).map_err(|e| e.to_string())?;
-        fs::write(&creds_path, creds).map_err(|e| e.to_string())?;
-    }
-    Ok(devincli::auth_status(Some(home)).unwrap_or_default())
-}
-
 /// Paste-token path: wrap a raw session token into credentials.toml, verify
-/// it against the CLI, then save. Unverifiable tokens aren't saved.
+/// it against GetUserStatus, then save. Unverifiable tokens aren't saved.
 pub fn add_token(name: &str, token: &str) -> Result<ProfileInfo, String> {
     let token = token.trim();
     if token.is_empty() {
@@ -146,39 +140,12 @@ pub fn add_token(name: &str, token: &str) -> Result<ProfileInfo, String> {
         "https://api.devin.ai",
     )
     .into_bytes();
-    let home = paths::run_dir().join(format!(
-        "token-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0)
-    ));
-    let res = stage_creds(&home, &creds);
-    let auth = match res {
-        Ok(a) => a,
-        Err(e) => {
-            login::cleanup_home(&home);
-            return Err(e);
-        }
-    };
-    if !auth.logged_in {
-        login::cleanup_home(&home);
-        return Err("`devin auth status` doesn't recognize this token".into());
+    let (key, server) = usage::creds_secrets(&creds)?;
+    let u = usage::user_status(&key, &server).map_err(|e| format!("token not recognized: {e}"))?;
+    if u.email.is_empty() && u.name.is_empty() {
+        return Err("token not recognized: empty user status".into());
     }
-    let saved = store::save(
-        name,
-        &creds,
-        &Meta {
-            email: auth.email,
-            display_name: auth.name,
-            plan: auth.plan,
-            org_id: None,
-            note: String::new(),
-            created_at: now_stamp(),
-        },
-    );
-    login::cleanup_home(&home);
-    saved
+    store::save(name, &creds, &meta_from(u, None, ""))
 }
 
 /// Switch the CLI (and thereby Desktop) to a stored profile.
@@ -190,6 +157,16 @@ pub fn use_profile(name: &str) -> Result<UseResult, String> {
         .find(|p| p.name == name)
         .map(|p| p.meta)
         .unwrap_or_default();
+
+    // Fresh quota + the account's own org_id, while we still can (a dead
+    // network or unparseable profile shouldn't block the swap itself).
+    let u = usage::creds_secrets(&creds)
+        .and_then(|(k, s)| usage::user_status(&k, &s))
+        .ok();
+    let org = u
+        .as_ref()
+        .and_then(|x| x.org_id.clone())
+        .or(meta.org_id.clone());
 
     let target = paths::credentials_path();
     if let Some(parent) = target.parent() {
@@ -204,22 +181,39 @@ pub fn use_profile(name: &str) -> Result<UseResult, String> {
     }
     fs::rename(&tmp, &target).map_err(|e| format!("rename credentials: {e}"))?;
 
-    config::apply_org_id(meta.org_id.as_deref())?;
+    config::apply_org_id(org.as_deref())?;
 
     let auth = devincli::auth_status(None).unwrap_or_default();
-    // Self-heal the profile's identity fields from the live status.
-    if auth.logged_in {
-        let mut m = meta.clone();
-        m.email = auth.email.clone();
-        m.display_name = auth.name.clone();
-        m.plan = auth.plan.clone();
-        let _ = store::save(&name, &creds, &m);
+    // Refresh the stored meta from whatever we just learned.
+    if let Some(u) = u {
+        if !u.email.is_empty() || !u.plan.is_empty() {
+            let mut m = meta_from(u, org.clone(), &meta.note);
+            m.created_at = meta.created_at.clone();
+            let _ = store::save(&name, &creds, &m);
+        }
     }
 
     Ok(UseResult {
         auth,
         restart_needed: running_devin_processes(),
     })
+}
+
+/// Force-refresh a profile's cached quota (called by the UI's refresh
+/// button; skips the 60s cache).
+pub fn refresh_usage(name: &str) -> Result<ProfileInfo, String> {
+    let name = store::sanitize_name(name)?;
+    let creds = store::creds_of(&name)?;
+    let meta = store::list()
+        .into_iter()
+        .find(|p| p.name == name)
+        .map(|p| p.meta)
+        .unwrap_or_default();
+    let (key, server) = usage::creds_secrets(&creds)?;
+    let u = usage::user_status(&key, &server)?;
+    let mut m = meta_from(u, meta.org_id, &meta.note);
+    m.created_at = meta.created_at;
+    store::save(&name, &creds, &m)
 }
 
 /// Launch a devin session that runs under an isolated data home, so it can
@@ -395,22 +389,26 @@ mod tests {
         // switch
         let r = use_profile("a").unwrap();
         assert_eq!(fs::read(&real_creds).unwrap(), b"creds-a");
-        let cfg: serde_json::Value = serde_json::from_slice(
-            &fs::read(cfgd.join("devin").join("config.json")).unwrap(),
-        )
-        .unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_slice(&fs::read(cfgd.join("devin").join("config.json")).unwrap())
+                .unwrap();
         assert_eq!(cfg["devin"]["org_id"], "org-a");
         assert!(cfg.get("agent").is_some(), "other keys preserved");
-        assert!(store::list().iter().find(|p| p.name == "a").unwrap().is_active);
+        assert!(
+            store::list()
+                .iter()
+                .find(|p| p.name == "a")
+                .unwrap()
+                .is_active
+        );
         let _ = r; // auth may be empty without a devin-signed fake home
 
         // a profile with no org recorded clears the key entirely
         store::save("b", b"creds-b", &Meta::default()).unwrap();
         use_profile("b").unwrap();
-        let cfg: serde_json::Value = serde_json::from_slice(
-            &fs::read(cfgd.join("devin").join("config.json")).unwrap(),
-        )
-        .unwrap();
+        let cfg: serde_json::Value =
+            serde_json::from_slice(&fs::read(cfgd.join("devin").join("config.json")).unwrap())
+                .unwrap();
         assert!(cfg["devin"].get("org_id").is_none());
 
         match prev_data {

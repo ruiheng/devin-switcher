@@ -73,10 +73,7 @@ pub fn vault_dir() -> PathBuf {
         if let Some(app) = env_nonempty("APPDATA") {
             return PathBuf::from(app).join("devin-switch");
         }
-        return home()
-            .join("AppData")
-            .join("Roaming")
-            .join("devin-switch");
+        return home().join("AppData").join("Roaming").join("devin-switch");
     }
     #[cfg(not(windows))]
     {
@@ -127,10 +124,7 @@ mod tests {
     fn creds_under_data_dir() {
         // env-independent checks only: other tests mutate XDG vars.
         assert_eq!(credentials_path().file_name().unwrap(), "credentials.toml");
-        assert!(credentials_path()
-            .parent()
-            .unwrap()
-            .ends_with("devin"));
+        assert!(credentials_path().parent().unwrap().ends_with("devin"));
         assert!(vault_dir().ends_with("devin-switch"));
     }
 }
