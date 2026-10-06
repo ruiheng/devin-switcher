@@ -45,7 +45,7 @@ const I18N = {
     codeOrToken: "Code or token",
     saveToken: "Save",
     savedAccounts: "SAVED ACCOUNTS",
-    noProfiles: "No saved accounts yet.<br>Add your first account below.",
+    noProfiles: "No saved accounts yet.<br>Use + Add account above.",
     noProfilesSignedIn:
       "No saved accounts yet — the current sign-in isn't saved.",
     unknown: "unknown account",
@@ -112,7 +112,7 @@ const I18N = {
     codeOrToken: "Code 或 token",
     saveToken: "保存",
     savedAccounts: "已保存的账号",
-    noProfiles: "还没有保存的账号。<br>在下方添加第一个账号。",
+    noProfiles: "还没有保存的账号。<br>点上方「+ 添加账号」。",
     noProfilesSignedIn: "还没有保存的账号——当前登录的账号未保存。",
     unknown: "未知账号",
     swUse: "切换",
