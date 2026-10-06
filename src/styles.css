@@ -1,0 +1,134 @@
+:root {
+  --bg: #0f1115;
+  --card: #171a21;
+  --card2: #1d212b;
+  --border: #2a2f3a;
+  --text: #e6e9ef;
+  --sub: #8b93a3;
+  --accent: #5b6cff;
+  --accent2: #7c86ff;
+  --green: #3fb950;
+  --amber: #d29922;
+  --red: #f85149;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 -apple-system, "SF Pro", "Segoe UI", Roboto, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+.hidden { display: none !important; }
+
+header {
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid var(--border);
+}
+h1 { font-size: 16px; margin: 0 0 10px; font-weight: 600; letter-spacing: .2px; }
+
+.current {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px;
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--sub); flex: none; }
+.dot.on { background: var(--green); }
+.current-text { min-width: 0; }
+#currentLabel { font-weight: 600; }
+.sub { color: var(--sub); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+main { padding: 14px 18px; overflow-y: auto; flex: 1; }
+
+.warn {
+  background: rgba(210,153,34,.12); border: 1px solid rgba(210,153,34,.4);
+  color: #e8c268; border-radius: 8px; padding: 9px 12px; margin-bottom: 12px;
+  font-size: 12.5px;
+}
+
+.profiles { display: flex; flex-direction: column; gap: 10px; }
+.profile {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 14px;
+}
+.profile.active { border-color: rgba(63,185,80,.55); }
+.profile .top { display: flex; align-items: center; gap: 8px; }
+.profile .name { font-weight: 600; }
+.badge {
+  font-size: 10.5px; padding: 1px 7px; border-radius: 20px;
+  background: rgba(63,185,80,.15); color: var(--green);
+  border: 1px solid rgba(63,185,80,.4); font-weight: 600;
+}
+.profile .meta { color: var(--sub); font-size: 12.5px; margin-top: 3px; }
+.profile .note { color: var(--sub); font-size: 12px; margin-top: 4px; font-style: italic; }
+.actions { display: flex; gap: 8px; margin-top: 10px; }
+
+button {
+  font: inherit; color: var(--text); background: var(--card2);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 12px; cursor: pointer; font-size: 12.5px;
+}
+button:hover { border-color: #3a4152; background: #232834; }
+button.primary, button.use { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover, button.use:hover { background: var(--accent2); border-color: var(--accent2); }
+button.danger { color: #ff8a80; }
+button.danger:hover { border-color: var(--red); }
+button.ghost { background: transparent; }
+button:disabled { opacity: .5; cursor: default; }
+
+.add {
+  width: 100%; margin-top: 12px; padding: 10px;
+  border-style: dashed; color: var(--sub); font-size: 13px;
+}
+.add:hover { color: var(--text); }
+
+.sheet {
+  position: fixed; inset: 0; background: rgba(0,0,0,.55);
+  display: grid; place-items: center; z-index: 10;
+}
+.sheet-card {
+  position: relative; width: 440px; max-width: 92vw;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; padding: 18px;
+}
+.sheet-card h2 { margin: 0 0 12px; font-size: 15px; }
+.sheet-card .close {
+  position: absolute; top: 12px; right: 12px;
+  border: none; background: none; color: var(--sub); font-size: 14px;
+}
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.tab { font-size: 12px; padding: 5px 10px; }
+.tab.active { border-color: var(--accent); color: var(--accent2); }
+.hint { color: var(--sub); font-size: 12.5px; margin: 0 0 12px; }
+.hint code { color: var(--text); }
+.field { margin-bottom: 10px; }
+.field label { display: block; font-size: 12px; color: var(--sub); margin-bottom: 4px; }
+.field input {
+  width: 100%; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px; padding: 7px 10px;
+  font: inherit; font-size: 13px;
+}
+.field input:focus { outline: none; border-color: var(--accent); }
+
+.wait-text { color: var(--amber); font-size: 13px; margin: 12px 0 8px; }
+.linkrow { display: flex; gap: 6px; }
+.linkrow input {
+  flex: 1; min-width: 0; background: var(--bg); color: var(--sub);
+  border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px;
+  font-size: 11px; font-family: ui-monospace, monospace;
+}
+details.manual { margin: 12px 0; font-size: 12px; color: var(--sub); }
+details.manual code {
+  display: block; margin-top: 6px; padding: 8px; background: var(--bg);
+  border-radius: 6px; font-size: 11px; word-break: break-all; user-select: all;
+}
+
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--card2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 9px 16px; font-size: 13px; z-index: 20;
+  max-width: 90vw;
+}
+.toast.err { border-color: rgba(248,81,73,.5); color: #ff9d95; }

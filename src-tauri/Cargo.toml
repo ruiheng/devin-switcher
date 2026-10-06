@@ -1,0 +1,29 @@
+[package]
+name = "devin-switch"
+version = "0.1.0"
+edition = "2021"
+description = "Switch between multiple Devin accounts (CLI + Desktop)"
+license = "MIT"
+
+[lib]
+name = "devin_switch_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.30"
+ureq = { version = "3", features = ["json"] }
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
