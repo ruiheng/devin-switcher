@@ -19,6 +19,15 @@ mod gui {
 
     static MANUAL: Mutex<Option<ManualLogin>> = Mutex::new(None);
 
+    /// Log a command failure to errors.log before returning it — release
+    /// builds have no devtools, so a missed toast is otherwise lost.
+    fn logged<T>(ctx: &str, r: Result<T, String>) -> Result<T, String> {
+        r.map_err(|e| {
+            ops::log_error(ctx, &e);
+            e
+        })
+    }
+
     #[tauri::command]
     pub async fn get_status() -> Status {
         ops::status()
@@ -26,42 +35,49 @@ mod gui {
 
     #[tauri::command]
     pub async fn list_profiles() -> Vec<ProfileInfo> {
+        ops::auto_refresh_stale();
         store::list()
     }
 
     #[tauri::command]
     pub async fn save_current(name: String, note: String) -> Result<ProfileInfo, String> {
-        ops::save_current(&name, &note)
+        logged("save_current", ops::save_current(&name, &note))
     }
 
     #[tauri::command]
     pub async fn delete_profile(name: String) -> Result<(), String> {
-        store::remove(&name)
+        logged("delete_profile", store::remove(&name))
     }
 
     #[tauri::command]
     pub async fn rename_profile(from: String, to: String) -> Result<ProfileInfo, String> {
-        store::rename(&from, &to)
+        logged("rename_profile", store::rename(&from, &to))
     }
 
     #[tauri::command]
     pub async fn use_profile(name: String, scope: Option<String>) -> Result<UseResult, String> {
-        ops::use_profile(&name, scope.as_deref().unwrap_or("all"))
+        logged("use_profile", ops::use_profile(&name, scope.as_deref().unwrap_or("all")))
     }
 
     #[tauri::command]
     pub async fn refresh_usage(name: String) -> Result<ProfileInfo, String> {
-        ops::refresh_usage(&name)
+        logged("refresh_usage", ops::refresh_usage(&name))
+    }
+
+    #[tauri::command]
+    pub async fn refresh_all() -> Vec<ProfileInfo> {
+        ops::refresh_all();
+        store::list()
     }
 
     #[tauri::command]
     pub async fn start_login() -> Result<login::LoginOffer, String> {
-        login::start()
+        logged("start_login", login::start())
     }
 
     #[tauri::command]
     pub async fn poll_login(id: u64, name: String, note: String) -> Result<LoginOutcome, String> {
-        ops::finish_login(id, &name, &note)
+        logged("poll_login", ops::finish_login(id, &name, &note))
     }
 
     #[tauri::command]
@@ -72,13 +88,13 @@ mod gui {
 
     #[tauri::command]
     pub async fn add_token(name: String, token: String) -> Result<ProfileInfo, String> {
-        ops::add_token(&name, &token)
+        logged("add_token", ops::add_token(&name, &token))
     }
 
     /// Save Devin Desktop's current sign-in as an account.
     #[tauri::command]
     pub async fn import_desktop(name: String) -> Result<ProfileInfo, String> {
-        ops::import_desktop(&name)
+        logged("import_desktop", ops::import_desktop(&name))
     }
 
     /// Manual (paste-code) login for the GUI's token tab: same PKCE round
@@ -102,13 +118,16 @@ mod gui {
         let m = MANUAL.lock().unwrap().take().ok_or_else(|| {
             "no manual login in progress — click the link button first".to_string()
         })?;
-        let creds = login::manual_finish(&m, &code)?;
-        ops::save_creds(&creds, &name)
+        let creds = login::manual_finish(&m, &code).map_err(|e| {
+            ops::log_error("manual_finish", &e);
+            e
+        })?;
+        logged("manual_finish", ops::save_creds(&creds, &name))
     }
 
     #[tauri::command]
     pub async fn launch_parallel(name: String, cwd: Option<String>) -> Result<ParallelLaunch, String> {
-        ops::launch_parallel(&name, cwd.as_deref())
+        logged("launch_parallel", ops::launch_parallel(&name, cwd.as_deref()))
     }
 }
 
@@ -125,6 +144,7 @@ pub fn run() {
             gui::rename_profile,
             gui::use_profile,
             gui::refresh_usage,
+            gui::refresh_all,
             gui::start_login,
             gui::poll_login,
             gui::cancel_login,

@@ -11,18 +11,30 @@
     <h1>Devin Switch</h1>
     <button id="langBtn" class="lang">中/EN</button>
     <div id="current" class="current">
-      <span class="dot" id="currentDot"></span>
-      <div class="current-text">
-        <div id="currentTag" class="curtag" data-i18n="currentTag">CURRENT SIGN-IN</div>
-        <div id="currentLabel">…</div>
-        <div id="currentSub" class="sub"></div>
-        <div id="currentQuota" class="quota"></div>
+      <div class="currow">
+        <span class="curtag" data-i18n="cliTag">CLI</span>
+        <span class="dot" id="dotCli"></span>
+        <div class="current-text">
+          <div id="labelCli" class="curlabel">…</div>
+          <div id="subCli" class="sub"></div>
+          <div id="quotaCli" class="quota"></div>
+        </div>
+      </div>
+      <div class="currow hidden" id="rowDesktop">
+        <span class="curtag" data-i18n="desktopTag">DESKTOP</span>
+        <span class="dot" id="dotDesktop"></span>
+        <div class="current-text">
+          <div id="labelDesktop" class="curlabel">…</div>
+          <div id="subDesktop" class="sub"></div>
+          <div id="quotaDesktop" class="quota"></div>
+        </div>
       </div>
     </div>
   </header>
 
   <div class="sectag">
     <span data-i18n="savedAccounts">SAVED ACCOUNTS</span>
+    <button id="refAll" data-i18n="refAll">Refresh all</button>
     <button id="addBtn" data-i18n="addAccount">+ Add account</button>
   </div>
   <main>

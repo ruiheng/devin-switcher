@@ -12,6 +12,9 @@ const esc = (s) =>
 const I18N = {
   en: {
     currentTag: "CURRENT SIGN-IN",
+    cliTag: "CLI",
+    desktopTag: "DESKTOP",
+    activeDesk: "DESKTOP",
     checking: "Checking…",
     notSignedIn: "Not signed in",
     cliNotFound: "devin CLI not found",
@@ -76,6 +79,7 @@ const I18N = {
     savedAs: (n) => `Saved as ${n}`,
     savedTok: (n) => `Saved ${n}`,
     signedInAs: (n) => `Signed in as ${n}`,
+    refAll: "Refresh all",
     switchedTo: (w) => `Switched to ${w}`,
     swScopeCli: "Switch CLI only",
     swScopeDesktop: "Switch Desktop only",
@@ -100,6 +104,9 @@ const I18N = {
   },
   zh: {
     currentTag: "当前登录",
+    cliTag: "CLI",
+    desktopTag: "桌面端",
+    activeDesk: "桌面端",
     checking: "检查中…",
     notSignedIn: "未登录",
     cliNotFound: "找不到 devin CLI",
@@ -161,6 +168,7 @@ const I18N = {
     savedAs: (n) => `已保存为 ${n}`,
     savedTok: (n) => `已保存 ${n}`,
     signedInAs: (n) => `已登录 ${n}`,
+    refAll: "刷新全部",
     switchedTo: (w) => `已切换到 ${w}`,
     swScopeCli: "仅切换 CLI",
     swScopeDesktop: "仅切换桌面端",
@@ -198,6 +206,9 @@ function applyI18n() {
   });
   document.querySelectorAll("[data-i18n-ph]").forEach((el) => {
     el.placeholder = t(el.dataset.i18nPh);
+  });
+  document.querySelectorAll("[data-i18n-tt]").forEach((el) => {
+    el.title = t(el.dataset.i18nTt);
   });
   $("langBtn").textContent = lang === "zh" ? "EN" : "中";
   refresh();
@@ -263,20 +274,43 @@ async function pend(el, fn) {
 }
 
 function renderStatus(s) {
-  const dot = $("currentDot");
+  const d = $("dotCli");
   if (s.auth && s.auth.logged_in) {
-    dot.classList.add("on");
-    $("currentLabel").textContent =
-      s.auth.name || s.auth.email || t("signedIn");
-    $("currentSub").textContent = [s.auth.email, s.auth.plan || s.auth.tier]
+    d.classList.add("on");
+    $("labelCli").textContent = s.auth.name || s.auth.email || t("signedIn");
+    $("subCli").textContent = [s.auth.email, s.auth.plan || s.auth.tier]
       .filter(Boolean)
       .join(" · ");
   } else {
-    dot.classList.remove("on");
-    $("currentLabel").textContent = t("notSignedIn");
-    $("currentSub").textContent = s.devin_installed ? "" : t("cliNotFound");
+    d.classList.remove("on");
+    $("labelCli").textContent = t("notSignedIn");
+    $("subCli").textContent = s.devin_installed ? "" : t("cliNotFound");
   }
-  $("currentQuota").innerHTML = quotaHtml(s.usage);
+  $("quotaCli").innerHTML = quotaHtml(s.usage);
+
+  // Desktop row only exists when Desktop is installed — on a CLI-only
+  // machine the row is noise, so hide it rather than show "not found".
+  const row = $("rowDesktop");
+  if (!s.desktop) {
+    row.classList.add("hidden");
+    return;
+  }
+  row.classList.remove("hidden");
+  const dd = $("dotDesktop");
+  if (s.desktop.logged_in) {
+    dd.classList.add("on");
+    $("labelDesktop").textContent =
+      s.desktop.name || s.desktop.email || s.desktop.label || t("signedIn");
+    const plan = s.desktop.usage?.plan || s.desktop.usage?.tier;
+    $("subDesktop").textContent = [s.desktop.email, plan]
+      .filter(Boolean)
+      .join(" · ");
+  } else {
+    dd.classList.remove("on");
+    $("labelDesktop").textContent = t("notSignedIn");
+    $("subDesktop").textContent = "";
+  }
+  $("quotaDesktop").innerHTML = quotaHtml(s.desktop.usage);
 }
 
 // Usage → labeled progress bars. Fill = % remaining for daily/weekly,
@@ -330,8 +364,11 @@ function quotaHtml(u) {
     );
   }
   const foot = [];
-  if (u.overage_micros != null && u.overage_micros > 0) {
-    foot.push(`${t("overage")} +$${(u.overage_micros / 1e6).toFixed(2)}`);
+  if (u.overage_micros != null && u.overage_micros !== 0) {
+    const v = u.overage_micros / 1e6;
+    foot.push(
+      `${t("overage")} ${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(2)}`
+    );
   }
   if (u.plan_end) foot.push(`${t("planEnds")} ${esc(u.plan_end.slice(0, 10))}`);
   if (foot.length) rows.push(`<div class="qfoot">${foot.join(" · ")}</div>`);
@@ -360,13 +397,10 @@ function resetText(unix) {
 
 function renderProfiles(profiles, status, force = false) {
   const el = $("profiles");
-  // The banner only earns its space when the live sign-in is NOT a saved
-  // profile (signed out, or an unsaved account). When it matches a card,
-  // the ACTIVE badge already says it — hide the banner instead.
   const active = profiles.find((p) => p.is_active);
   signedIn = !!status?.auth?.logged_in;
   activeSaved = !!active;
-  $("current").classList.toggle("hidden", !!active);
+  const dsk = status?.desktop?.logged_in ? status.desktop : null;
   // Don't clobber an in-progress rename, armed delete, or busy card on
   // the 5s poll — an action's own refresh passes force to bypass this.
   if (!force && el.querySelector(".rename-in, .danger.armed, .busy, .menu"))
@@ -387,9 +421,17 @@ function renderProfiles(profiles, status, force = false) {
   }
   el.innerHTML = "";
   for (const p of profiles) {
+    // A profile can be live on CLI, on Desktop, on both (fully switched),
+    // or neither. Match Desktop by user_id, falling back to email for
+    // accounts saved before we recorded user_id.
+    const deskActive =
+      dsk &&
+      ((p.user_id && p.user_id === dsk.user_id) ||
+        (dsk.email && p.email === dsk.email));
+    const bothActive = p.is_active && deskActive;
     const card = document.createElement("div");
     card.className = "profile" + (p.is_active ? " active" : "");
-    if (!p.is_active) {
+    if (!bothActive) {
       card.classList.add("switchable");
       card.title = t("swHint");
     }
@@ -397,6 +439,7 @@ function renderProfiles(profiles, status, force = false) {
       <div class="top">
         <span class="name" title="${esc(t("renHint"))}">${esc(p.name)}</span>
         ${p.is_active ? `<span class="badge">${t("active")}</span>` : ""}
+        ${deskActive ? `<span class="badge desk">${t("activeDesk")}</span>` : ""}
         <button class="icobtn danger" data-act="del" title="${t("swDel")}">✕</button>
       </div>
       <div class="meta">${esc(
@@ -410,7 +453,7 @@ function renderProfiles(profiles, status, force = false) {
       </div>
       ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
       ${
-        p.is_active
+        bothActive
           ? ""
           : `<div class="actions"><span class="splitbtn"><button class="use" data-act="use">${t("swUse")}</button><button class="use caret" data-act="usemenu" title="${t("swMore")}">▾</button></span><button data-act="par">${t("swPar")}</button></div>`
       }`;
@@ -451,7 +494,7 @@ function renderProfiles(profiles, status, force = false) {
       e.stopPropagation();
       inlineRename(e.currentTarget, p.name);
     };
-    if (!p.is_active) {
+    if (!bothActive) {
       card.ondblclick = (e) => {
         if (e.target.closest("button, input, .menu")) return;
         pend(card, () => useProfile(p.name, "all"));
@@ -620,6 +663,12 @@ async function saveCurrent() {
 }
 
 $("saveCurrent").onclick = (e) => pend(e.currentTarget, saveCurrent);
+
+$("refAll").onclick = (e) =>
+  pend(e.currentTarget, async () => {
+    await invoke("refresh_all");
+    await refresh(true);
+  });
 
 $("importDesktop").onclick = (e) =>
   pend(e.currentTarget, async () => {

@@ -1,8 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Mutex;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
 
@@ -19,9 +20,24 @@ use crate::usage::{self, Usage};
 pub struct Status {
     pub auth: AuthStatus,
     pub usage: Option<Usage>,
+    /// Devin Desktop's own sign-in — independent store from the CLI's.
+    /// None when Desktop isn't installed or holds no session.
+    pub desktop: Option<DesktopNow>,
     pub running: Vec<String>,
     pub devin_installed: bool,
     pub credentials_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DesktopNow {
+    pub logged_in: bool,
+    /// Display name straight from the session record.
+    pub label: String,
+    pub user_id: String,
+    /// Filled by the cached quota fetch — may lag a minute.
+    pub email: String,
+    pub name: String,
+    pub usage: Option<Usage>,
 }
 
 /// `devin auth status` spawns the CLI — seconds on Windows — so UI polling
@@ -46,6 +62,55 @@ fn auth_status_cached() -> AuthStatus {
     st
 }
 
+/// Desktop's session, cached on state.vscdb's (mtime, len) — the decrypt
+/// is cheap but polling every 5s shouldn't redo it, and a transient
+/// lock while Desktop writes shouldn't flicker the banner.
+static DESK_CACHE: Mutex<Option<(Option<(SystemTime, u64)>, Option<DesktopNow>)>> =
+    Mutex::new(None);
+
+fn desktop_now() -> Option<DesktopNow> {
+    let db = desktop::db_path()?;
+    let key = fs::metadata(&db)
+        .and_then(|m| m.modified().map(|t| (t, m.len())))
+        .ok();
+    let mut g = DESK_CACHE.lock().unwrap();
+    if let Some((k, d)) = g.as_ref() {
+        if *k == key {
+            return d.clone();
+        }
+    }
+    let out = Some(match desktop::current_session() {
+        Ok(s) => {
+            let creds = login::credentials_toml(
+                &s.token,
+                "https://server.codeium.com",
+                "app.devin.ai",
+                "https://api.devin.ai",
+            )
+            .into_bytes();
+            let u = usage::user_status_cached(&creds).ok();
+            DesktopNow {
+                logged_in: true,
+                label: s.label,
+                user_id: s.user_id,
+                email: u.as_ref().map(|x| x.email.clone()).unwrap_or_default(),
+                name: u.as_ref().map(|x| x.name.clone()).unwrap_or_default(),
+                usage: u,
+            }
+        }
+        Err(_) => DesktopNow {
+            logged_in: false,
+            label: String::new(),
+            user_id: String::new(),
+            email: String::new(),
+            name: String::new(),
+            usage: None,
+        },
+    });
+    *g = Some((key, out.clone()));
+    out
+}
+
 pub fn status() -> Status {
     let usage = fs::read(paths::credentials_path())
         .ok()
@@ -53,10 +118,80 @@ pub fn status() -> Status {
     Status {
         auth: auth_status_cached(),
         usage,
+        desktop: desktop::installed().then(desktop_now).flatten(),
         running: running_devin_processes(),
         devin_installed: paths::devin_bin().is_some(),
         credentials_path: paths::credentials_path().display().to_string(),
     }
+}
+
+/// Kick a background quota refresh for profiles whose snapshot is stale
+/// (>5min) — the next poll shows fresh bars. In-flight and recently
+/// attempted names are skipped so a dead network can't multiply calls.
+static REFRESHING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+static REFRESH_TRIED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+
+pub fn auto_refresh_stale() {
+    let now = unix_now();
+    for p in store::list() {
+        if now - p.meta.usage_at <= 300 {
+            continue;
+        }
+        {
+            let mut tried = REFRESH_TRIED.lock().unwrap();
+            let map = tried.get_or_insert_with(HashMap::new);
+            if map
+                .get(&p.name)
+                .map(|t| t.elapsed() < Duration::from_secs(300))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            map.insert(p.name.clone(), Instant::now());
+        }
+        {
+            let mut inflight = REFRESHING.lock().unwrap();
+            if !inflight.insert(p.name.clone()) {
+                continue;
+            }
+        }
+        let name = p.name.clone();
+        std::thread::spawn(move || {
+            let _ = refresh_usage(&name);
+            REFRESHING.lock().unwrap().remove(&name);
+        });
+    }
+}
+
+/// "Refresh all" — every profile's quota, fetched in parallel. Blocks
+/// until done so the caller's next list shows fresh bars.
+pub fn refresh_all() {
+    let handles: Vec<_> = store::list()
+        .into_iter()
+        .map(|p| {
+            let name = p.name.clone();
+            std::thread::spawn(move || {
+                let _ = refresh_usage(&name);
+            })
+        })
+        .collect();
+    for h in handles {
+        let _ = h.join();
+    }
+}
+
+/// Append an error to %APPDATA%/devin-switch/errors.log — release builds
+/// have no devtools, and a toast the user couldn't read in time is
+/// otherwise unrecoverable. Best-effort; never fails the caller.
+pub fn log_error(ctx: &str, msg: &str) {
+    let dir = paths::vault_dir();
+    let _ = fs::create_dir_all(&dir);
+    let line = format!("{} [{}] {}\n", unix_now(), ctx, msg);
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("errors.log"))
+        .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
 }
 
 fn unix_now() -> i64 {

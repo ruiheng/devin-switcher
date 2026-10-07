@@ -54,7 +54,8 @@ pub fn userdata_dir() -> Option<PathBuf> {
     }
 }
 
-fn db_path() -> Option<PathBuf> {
+/// The Electron state DB — exposed so callers can cache by its mtime.
+pub fn db_path() -> Option<PathBuf> {
     userdata_dir().map(|d| d.join("User").join("globalStorage").join("state.vscdb"))
 }
 
@@ -162,6 +163,9 @@ pub fn current_session() -> Result<DesktopSession, String> {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .map_err(|e| format!("open state.vscdb: {e}"))?;
+    // Desktop writes this DB while running — wait out short locks instead
+    // of failing with SQLITE_BUSY.
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(3));
     let raw: String = conn
         .query_row(
             "SELECT value FROM ItemTable WHERE key=?1",

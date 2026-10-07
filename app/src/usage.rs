@@ -200,10 +200,18 @@ pub fn user_status(key: &str, server: &str) -> Result<Usage, String> {
     if !hide("hideDailyQuota") {
         u.daily_left = num(st, "dailyQuotaRemainingPercent");
         u.daily_reset_unix = num(st, "dailyQuotaResetAtUnix").map(|f| f as i64);
+        // Spent windows lose their percent field entirely — a reset stamp
+        // without a remaining % means the window exists and it's empty.
+        if u.daily_left.is_none() && u.daily_reset_unix.is_some() {
+            u.daily_left = Some(0.0);
+        }
     }
     if !hide("hideWeeklyQuota") {
         u.weekly_left = num(st, "weeklyQuotaRemainingPercent");
         u.weekly_reset_unix = num(st, "weeklyQuotaResetAtUnix").map(|f| f as i64);
+        if u.weekly_left.is_none() && u.weekly_reset_unix.is_some() {
+            u.weekly_left = Some(0.0);
+        }
     }
     Ok(u)
 }
