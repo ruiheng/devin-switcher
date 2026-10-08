@@ -62,10 +62,11 @@ fn auth_status_cached() -> AuthStatus {
     st
 }
 
-/// Desktop's session, cached on state.vscdb's (mtime, len) — the decrypt
-/// is cheap but polling every 5s shouldn't redo it, and a transient
-/// lock while Desktop writes shouldn't flicker the banner.
-static DESK_CACHE: Mutex<Option<(Option<(SystemTime, u64)>, Option<DesktopNow>)>> =
+/// Desktop's session record, cached on state.vscdb's (mtime, len) — the
+/// decrypt is cheap but polling every 5s shouldn't redo it. The usage
+/// fetch is deliberately NOT cached here: it has its own 60s token cache
+/// and must keep refreshing even while the DB file sits unchanged.
+static DESK_CACHE: Mutex<Option<(Option<(SystemTime, u64)>, Option<desktop::DesktopSession>)>> =
     Mutex::new(None);
 
 fn desktop_now() -> Option<DesktopNow> {
@@ -73,14 +74,19 @@ fn desktop_now() -> Option<DesktopNow> {
     let key = fs::metadata(&db)
         .and_then(|m| m.modified().map(|t| (t, m.len())))
         .ok();
-    let mut g = DESK_CACHE.lock().unwrap();
-    if let Some((k, d)) = g.as_ref() {
-        if *k == key {
-            return d.clone();
+    let session = {
+        let mut g = DESK_CACHE.lock().unwrap();
+        match g.as_ref() {
+            Some((k, s)) if *k == key => s.clone(),
+            _ => {
+                let s = desktop::current_session().ok();
+                *g = Some((key, s.clone()));
+                s
+            }
         }
-    }
-    let out = Some(match desktop::current_session() {
-        Ok(s) => {
+    };
+    Some(match session {
+        Some(s) => {
             let creds = login::credentials_toml(
                 &s.token,
                 "https://server.codeium.com",
@@ -98,7 +104,7 @@ fn desktop_now() -> Option<DesktopNow> {
                 usage: u,
             }
         }
-        Err(_) => DesktopNow {
+        None => DesktopNow {
             logged_in: false,
             label: String::new(),
             user_id: String::new(),
@@ -106,9 +112,7 @@ fn desktop_now() -> Option<DesktopNow> {
             name: String::new(),
             usage: None,
         },
-    });
-    *g = Some((key, out.clone()));
-    out
+    })
 }
 
 pub fn status() -> Status {

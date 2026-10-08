@@ -14,6 +14,7 @@ const I18N = {
     currentTag: "CURRENT SIGN-IN",
     cliTag: "CLI",
     desktopTag: "DESKTOP",
+    bothTag: "CLI+DESKTOP",
     activeDesk: "DESKTOP",
     checking: "Checking…",
     notSignedIn: "Not signed in",
@@ -106,6 +107,7 @@ const I18N = {
     currentTag: "当前登录",
     cliTag: "CLI",
     desktopTag: "桌面端",
+    bothTag: "CLI+桌面端",
     activeDesk: "桌面端",
     checking: "检查中…",
     notSignedIn: "未登录",
@@ -274,7 +276,17 @@ async function pend(el, fn) {
 }
 
 function renderStatus(s) {
+  const dsk = s.desktop && s.desktop.logged_in ? s.desktop : null;
+  // Same account on both sides → merge into one row tagged CLI+DESKTOP;
+  // a duplicated "same account" row is noise.
+  const same =
+    dsk &&
+    s.auth?.logged_in &&
+    ((s.auth.user_id && s.auth.user_id === dsk.user_id) ||
+      (dsk.email && s.auth.email === dsk.email));
+
   const d = $("dotCli");
+  $("tagCli").textContent = same ? t("bothTag") : t("cliTag");
   if (s.auth && s.auth.logged_in) {
     d.classList.add("on");
     $("labelCli").textContent = s.auth.name || s.auth.email || t("signedIn");
@@ -286,12 +298,12 @@ function renderStatus(s) {
     $("labelCli").textContent = t("notSignedIn");
     $("subCli").textContent = s.devin_installed ? "" : t("cliNotFound");
   }
-  $("quotaCli").innerHTML = quotaHtml(s.usage);
+  $("quotaCli").innerHTML = quotaHtml(s.usage || dsk?.usage);
 
-  // Desktop row only exists when Desktop is installed — on a CLI-only
-  // machine the row is noise, so hide it rather than show "not found".
+  // Desktop row only exists when Desktop is installed AND signed in as a
+  // different account — otherwise the merged row covers it.
   const row = $("rowDesktop");
-  if (!s.desktop) {
+  if (!s.desktop || same) {
     row.classList.add("hidden");
     return;
   }
@@ -395,6 +407,19 @@ function resetText(unix) {
   return t("resetOn", `${dt.getMonth() + 1}/${dt.getDate()}`);
 }
 
+// Sort score = how much usable quota remains. Weekly is the binding
+// constraint so it dominates; daily breaks ties. ACU plans fall back to
+// their remaining %. No data → -1 → sinks to the bottom.
+function quotaScore(u) {
+  if (!u) return -1;
+  let w = u.weekly_left ?? u.daily_left;
+  if (w == null && u.acu_limit > 0) {
+    w = ((u.acu_limit - (u.acu_used || 0)) / u.acu_limit) * 100;
+  }
+  if (w == null) return -1;
+  return w * 10 + (u.daily_left ?? w) * 0.1;
+}
+
 function renderProfiles(profiles, status, force = false) {
   const el = $("profiles");
   const active = profiles.find((p) => p.is_active);
@@ -420,7 +445,10 @@ function renderProfiles(profiles, status, force = false) {
     return;
   }
   el.innerHTML = "";
-  for (const p of profiles) {
+  const sorted = [...profiles].sort(
+    (a, b) => quotaScore(b.usage) - quotaScore(a.usage)
+  );
+  for (const [i, p] of sorted.entries()) {
     // A profile can be live on CLI, on Desktop, on both (fully switched),
     // or neither. Match Desktop by user_id, falling back to email for
     // accounts saved before we recorded user_id.
@@ -437,9 +465,10 @@ function renderProfiles(profiles, status, force = false) {
     }
     card.innerHTML = `
       <div class="top">
+        <span class="idx">${i + 1}</span>
         <span class="name" title="${esc(t("renHint"))}">${esc(p.name)}</span>
-        ${p.is_active ? `<span class="badge">${t("active")}</span>` : ""}
-        ${deskActive ? `<span class="badge desk">${t("activeDesk")}</span>` : ""}
+        ${p.is_active ? `<span class="badge">${t("cliTag")}</span>` : ""}
+        ${deskActive ? `<span class="badge desk">${t("desktopTag")}</span>` : ""}
         <button class="icobtn danger" data-act="del" title="${t("swDel")}">✕</button>
       </div>
       <div class="meta">${esc(

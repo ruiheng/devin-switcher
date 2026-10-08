@@ -149,6 +149,7 @@ fn patch_json(
 
 /// What Desktop is currently signed in as — the first entry of the
 /// decrypted sessions secret. Read-only; safe while Desktop runs.
+#[derive(Clone)]
 pub struct DesktopSession {
     pub token: String,
     pub label: String,

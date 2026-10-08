@@ -56,7 +56,7 @@ header { position: relative; }
 .dot.on { background: var(--green); }
 .current-text { min-width: 0; flex: 1; }
 .curtag {
-  width: 44px; flex: none; padding-top: 2px;
+  min-width: 44px; flex: none; padding-top: 2px;
   font-size: 10px; letter-spacing: .08em; color: var(--sub);
 }
 .curlabel { font-weight: 600; }
@@ -110,6 +110,7 @@ main { padding: 14px 18px; overflow-y: auto; flex: 1; }
 }
 .profile.active { border-color: rgba(63,185,80,.55); }
 .profile .top { display: flex; align-items: center; gap: 8px; }
+.profile .idx { color: var(--sub); font-size: 11px; min-width: 2ch; }
 .profile .name { font-weight: 600; }
 .profile.switchable { cursor: pointer; }
 .icobtn {
