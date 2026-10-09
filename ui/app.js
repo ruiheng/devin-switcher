@@ -81,6 +81,8 @@ const I18N = {
     savedTok: (n) => `Saved ${n}`,
     signedInAs: (n) => `Signed in as ${n}`,
     refAll: "Refresh all",
+    copyHint: "Click to copy",
+    copied: "Copied",
     switchedTo: (w) => `Switched to ${w}`,
     swScopeCli: "Switch CLI only",
     swScopeDesktop: "Switch Desktop only",
@@ -171,6 +173,8 @@ const I18N = {
     savedTok: (n) => `已保存 ${n}`,
     signedInAs: (n) => `已登录 ${n}`,
     refAll: "刷新全部",
+    copyHint: "点击复制",
+    copied: "已复制",
     switchedTo: (w) => `已切换到 ${w}`,
     swScopeCli: "仅切换 CLI",
     swScopeDesktop: "仅切换桌面端",
@@ -290,6 +294,7 @@ function renderStatus(s) {
   if (s.auth && s.auth.logged_in) {
     d.classList.add("on");
     $("labelCli").textContent = s.auth.email || s.auth.name || t("signedIn");
+    $("labelCli").dataset.copy = s.auth.email || "";
     $("subCli").textContent = [
       s.auth.name && s.auth.name !== s.auth.email ? s.auth.name : null,
       s.auth.plan || s.auth.tier,
@@ -316,6 +321,7 @@ function renderStatus(s) {
     dd.classList.add("on");
     $("labelDesktop").textContent =
       s.desktop.email || s.desktop.name || s.desktop.label || t("signedIn");
+    $("labelDesktop").dataset.copy = s.desktop.email || "";
     const plan = s.desktop.usage?.plan || s.desktop.usage?.tier;
     $("subDesktop").textContent = [
       (s.desktop.name || s.desktop.label) !== s.desktop.email
@@ -479,7 +485,7 @@ function renderProfiles(profiles, status, force = false) {
     card.innerHTML = `
       <div class="top">
         <span class="idx">${i + 1}</span>
-        <span class="name">${esc(
+        <span class="name copyable" title="${esc(t("copyHint"))}">${esc(
           p.email || p.display_name || p.name
         )}</span>
         ${p.plan ? `<span class="sub">${esc(p.plan)}</span>` : ""}
@@ -531,6 +537,10 @@ function renderProfiles(profiles, status, force = false) {
       pend(e.currentTarget, () => refreshUsage(p.name));
     card.querySelector('[data-act="del"]').onclick = (e) =>
       armDelete(e.currentTarget, p.name, p.is_active);
+    card.querySelector(".name").onclick = (e) => {
+      e.stopPropagation();
+      copyText(p.email || p.display_name || p.name);
+    };
     card.querySelector(".pname").ondblclick = (e) => {
       e.stopPropagation();
       inlineRename(e.currentTarget, p.name);
@@ -593,6 +603,33 @@ async function parallel(name) {
     }
   } catch (e) {
     toast(String(e), true);
+  }
+}
+
+// Copy on click — WebView2's navigator.clipboard exists but can reject
+// without clipboard permission, so keep the execCommand fallback.
+function copyText(s) {
+  const legacy = () => {
+    const ta = document.createElement("textarea");
+    ta.value = s;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.append(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(s).then(
+      () => toast(t("copied")),
+      () => {
+        legacy();
+        toast(t("copied"));
+      }
+    );
+  } else {
+    legacy();
+    toast(t("copied"));
   }
 }
 
@@ -713,6 +750,13 @@ async function saveCurrent() {
 }
 
 $("saveCurrent").onclick = (e) => pend(e.currentTarget, saveCurrent);
+
+for (const id of ["labelCli", "labelDesktop"]) {
+  $(id).onclick = (e) => {
+    const v = e.currentTarget.dataset.copy;
+    if (v) copyText(v);
+  };
+}
 
 $("refAll").onclick = (e) =>
   pend(e.currentTarget, async () => {

@@ -60,6 +60,8 @@ header { position: relative; }
   font-size: 10px; letter-spacing: .08em; color: var(--sub);
 }
 .curlabel { font-weight: 600; }
+.copyable { cursor: pointer; }
+.copyable:hover { text-decoration: underline dotted; }
 .sub { color: var(--sub); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .quota-wrap { display: flex; align-items: flex-start; gap: 4px; margin-top: 8px; }
