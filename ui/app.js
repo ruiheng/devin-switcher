@@ -289,8 +289,11 @@ function renderStatus(s) {
   $("tagCli").textContent = same ? t("bothTag") : t("cliTag");
   if (s.auth && s.auth.logged_in) {
     d.classList.add("on");
-    $("labelCli").textContent = s.auth.name || s.auth.email || t("signedIn");
-    $("subCli").textContent = [s.auth.email, s.auth.plan || s.auth.tier]
+    $("labelCli").textContent = s.auth.email || s.auth.name || t("signedIn");
+    $("subCli").textContent = [
+      s.auth.name && s.auth.name !== s.auth.email ? s.auth.name : null,
+      s.auth.plan || s.auth.tier,
+    ]
       .filter(Boolean)
       .join(" · ");
   } else {
@@ -312,9 +315,14 @@ function renderStatus(s) {
   if (s.desktop.logged_in) {
     dd.classList.add("on");
     $("labelDesktop").textContent =
-      s.desktop.name || s.desktop.email || s.desktop.label || t("signedIn");
+      s.desktop.email || s.desktop.name || s.desktop.label || t("signedIn");
     const plan = s.desktop.usage?.plan || s.desktop.usage?.tier;
-    $("subDesktop").textContent = [s.desktop.email, plan]
+    $("subDesktop").textContent = [
+      (s.desktop.name || s.desktop.label) !== s.desktop.email
+        ? s.desktop.name || s.desktop.label
+        : null,
+      plan,
+    ]
       .filter(Boolean)
       .join(" · ");
   } else {
@@ -401,8 +409,13 @@ function resetText(unix) {
     )}:${pad2(s % 60)}`;
     return t("resetInHMS", c);
   }
-  const d = Math.floor(s / 86400);
-  if (d < 8) return t("resetInDH", d, Math.round((s % 86400) / 3600));
+  let d = Math.floor(s / 86400);
+  let h = Math.round((s % 86400) / 3600);
+  if (h === 24) {
+    d += 1;
+    h = 0;
+  }
+  if (d < 8) return t("resetInDH", d, h);
   const dt = new Date(unix * 1000);
   return t("resetOn", `${dt.getMonth() + 1}/${dt.getDate()}`);
 }
@@ -466,16 +479,15 @@ function renderProfiles(profiles, status, force = false) {
     card.innerHTML = `
       <div class="top">
         <span class="idx">${i + 1}</span>
-        <span class="name" title="${esc(t("renHint"))}">${esc(p.name)}</span>
+        <span class="name">${esc(
+          p.email || p.display_name || p.name
+        )}</span>
+        ${p.plan ? `<span class="sub">${esc(p.plan)}</span>` : ""}
+        <span class="pname" title="${esc(t("renHint"))}">@${esc(p.name)}</span>
         ${p.is_active ? `<span class="badge">${t("cliTag")}</span>` : ""}
         ${deskActive ? `<span class="badge desk">${t("desktopTag")}</span>` : ""}
         <button class="icobtn danger" data-act="del" title="${t("swDel")}">✕</button>
       </div>
-      <div class="meta">${esc(
-        [p.email || p.display_name || t("unknown"), p.plan]
-          .filter(Boolean)
-          .join(" · ")
-      )}</div>
       <div class="quota-wrap">
         <div class="quota">${p.usage ? quotaHtml(p.usage) : ""}</div>
         <button class="icobtn" data-act="ref" title="${t("swRef")}">↻</button>
@@ -519,7 +531,7 @@ function renderProfiles(profiles, status, force = false) {
       pend(e.currentTarget, () => refreshUsage(p.name));
     card.querySelector('[data-act="del"]').onclick = (e) =>
       armDelete(e.currentTarget, p.name, p.is_active);
-    card.querySelector(".name").ondblclick = (e) => {
+    card.querySelector(".pname").ondblclick = (e) => {
       e.stopPropagation();
       inlineRename(e.currentTarget, p.name);
     };
@@ -543,8 +555,17 @@ async function useProfile(name, scope) {
     const who = name;
     const warn = $("warnBanner");
     if (r.restart_needed && r.restart_needed.length) {
-      warn.textContent = t("restartWarn", who, r.restart_needed.join(", "));
+      warn.innerHTML = "";
+      const span = document.createElement("span");
+      span.textContent = t("restartWarn", who, r.restart_needed.join(", "));
+      const x = document.createElement("button");
+      x.className = "tx";
+      x.textContent = "✕";
+      x.onclick = () => warn.classList.add("hidden");
+      warn.append(span, x);
       warn.classList.remove("hidden");
+      clearTimeout(warn._h);
+      warn._h = setTimeout(() => warn.classList.add("hidden"), 15000);
     } else {
       warn.classList.add("hidden");
     }
