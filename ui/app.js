@@ -81,6 +81,8 @@ const I18N = {
     savedTok: (n) => `Saved ${n}`,
     signedInAs: (n) => `Signed in as ${n}`,
     refAll: "Refresh all",
+    filterPh: "Filter…",
+    noMatch: "No matching account",
     copyHint: "Click to copy",
     copied: "Copied",
     switchedTo: (w) => `Switched to ${w}`,
@@ -173,6 +175,8 @@ const I18N = {
     savedTok: (n) => `已保存 ${n}`,
     signedInAs: (n) => `已登录 ${n}`,
     refAll: "刷新全部",
+    filterPh: "过滤…",
+    noMatch: "没有匹配的账号",
     copyHint: "点击复制",
     copied: "已复制",
     switchedTo: (w) => `已切换到 ${w}`,
@@ -235,6 +239,11 @@ let loginTimer = null;
 // keep the tab until the first refresh() says otherwise.
 let signedIn = true;
 let activeSaved = false;
+// Filter box state + last poll results — typing re-renders without a
+// backend round-trip.
+let filterQuery = "";
+let lastProfiles = [];
+let lastStatus = null;
 
 function toast(msg, isErr = false) {
   const t2 = $("toast");
@@ -260,6 +269,8 @@ async function refresh(force = false) {
       invoke("get_status"),
       invoke("list_profiles"),
     ]);
+    lastProfiles = profiles;
+    lastStatus = status;
     renderStatus(status);
     renderProfiles(profiles, status, force);
   } catch (e) {
@@ -464,17 +475,38 @@ function renderProfiles(profiles, status, force = false) {
     return;
   }
   el.innerHTML = "";
-  const sorted = [...profiles].sort(
-    (a, b) => quotaScore(b.usage) - quotaScore(a.usage)
+  const q = filterQuery.trim().toLowerCase();
+  const shown = q
+    ? profiles.filter((p) =>
+        [p.email, p.name, p.display_name].some(
+          (f) => f && f.toLowerCase().includes(q)
+        )
+      )
+    : profiles;
+  // A card for the live account renders the SAME usage object the banner
+  // shows — the banner refreshes every ~60s while meta snapshots can be
+  // 5min stale, so without this the same account could show two numbers.
+  const deskOf = (p) =>
+    dsk &&
+    ((p.user_id && p.user_id === dsk.user_id) ||
+      (dsk.email && p.email === dsk.email));
+  const usageOf = (p) => {
+    if (p.is_active) return status?.usage ?? p.usage;
+    if (deskOf(p)) return status?.desktop?.usage ?? p.usage;
+    return p.usage;
+  };
+  const sorted = [...shown].sort(
+    (a, b) => quotaScore(usageOf(b)) - quotaScore(usageOf(a))
   );
+  if (!sorted.length) {
+    el.innerHTML = `<p class="sub empty">${t("noMatch")}</p>`;
+    return;
+  }
   for (const [i, p] of sorted.entries()) {
     // A profile can be live on CLI, on Desktop, on both (fully switched),
     // or neither. Match Desktop by user_id, falling back to email for
     // accounts saved before we recorded user_id.
-    const deskActive =
-      dsk &&
-      ((p.user_id && p.user_id === dsk.user_id) ||
-        (dsk.email && p.email === dsk.email));
+    const deskActive = deskOf(p);
     const bothActive = p.is_active && deskActive;
     const card = document.createElement("div");
     card.className = "profile" + (p.is_active ? " active" : "");
@@ -495,7 +527,7 @@ function renderProfiles(profiles, status, force = false) {
         <button class="icobtn danger" data-act="del" title="${t("swDel")}">✕</button>
       </div>
       <div class="quota-wrap">
-        <div class="quota">${p.usage ? quotaHtml(p.usage) : ""}</div>
+        <div class="quota">${quotaHtml(usageOf(p))}</div>
         <button class="icobtn" data-act="ref" title="${t("swRef")}">↻</button>
       </div>
       ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
@@ -757,6 +789,11 @@ for (const id of ["labelCli", "labelDesktop"]) {
     if (v) copyText(v);
   };
 }
+
+$("filterIn").oninput = (e) => {
+  filterQuery = e.currentTarget.value;
+  if (lastStatus) renderProfiles(lastProfiles, lastStatus, true);
+};
 
 $("refAll").onclick = (e) =>
   pend(e.currentTarget, async () => {
