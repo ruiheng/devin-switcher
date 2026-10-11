@@ -21,7 +21,12 @@ path = "src/bin/dsw.rs"
 
 [features]
 default = ["gui"]
-gui = ["dep:tauri", "dep:tauri-plugin-shell", "dep:tauri-build"]
+gui = [
+    "dep:tauri",
+    "dep:tauri-plugin-shell",
+    "dep:tauri-plugin-single-instance",
+    "dep:tauri-build",
+]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -38,6 +43,7 @@ base64 = "0.22"
 getrandom = "0.2"
 aes-gcm = "0.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
+tauri-plugin-single-instance = { version = "2", optional = true }
 
 [profile.release]
 strip = true
