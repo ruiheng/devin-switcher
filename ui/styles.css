@@ -63,6 +63,7 @@ header { position: relative; }
 .copyable { cursor: pointer; }
 .copyable:hover { text-decoration: underline dotted; }
 .sub { color: var(--sub); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub.err { white-space: normal; overflow: visible; text-overflow: clip; word-break: break-all; color: var(--low); }
 
 .quota-wrap { display: flex; align-items: flex-start; gap: 4px; margin-top: 8px; }
 .quota-wrap .quota { flex: 1; min-width: 0; margin-top: 0; }

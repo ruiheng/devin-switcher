@@ -342,10 +342,15 @@ function renderStatus(s) {
     ]
       .filter(Boolean)
       .join(" · ");
+    $("subDesktop").title = "";
+    $("subDesktop").classList.remove("err");
   } else {
     dd.classList.remove("on");
     $("labelDesktop").textContent = t("notSignedIn");
-    $("subDesktop").textContent = "";
+    const sub = $("subDesktop");
+    sub.textContent = s.desktop.error || "";
+    sub.title = s.desktop.error || "";
+    sub.classList.toggle("err", !!s.desktop.error);
   }
   $("quotaDesktop").innerHTML = quotaHtml(s.desktop.usage);
 }

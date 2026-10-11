@@ -20,63 +20,157 @@ use std::path::PathBuf;
 const SESSIONS_KEY: &str =
     r#"secret://{"extensionId":"codeium.windsurf","key":"windsurf_auth.sessions"}"#;
 
-/// Electron userData dir for Devin Desktop (`Devin`, capital D — the CLI
-/// uses lowercase `devin`; same directory on case-insensitive filesystems,
-/// but the Desktop paths below only exist once Desktop has run).
-pub fn userdata_dir() -> Option<PathBuf> {
+/// Product dirs Electron uses for Devin Desktop — "Devin" on current
+/// builds, "Windsurf" on Code-OSS-lineage installs (confirmed in the
+/// field: %APPDATA%\Windsurf\User\globalStorage\state.vscdb).
+const PRODUCT_DIRS: [&str; 2] = ["Devin", "Windsurf"];
+/// Main executable names under those install dirs.
+const EXE_NAMES: [&str; 2] = ["devin.exe", "windsurf.exe"];
+
+fn looks_like_userdata(d: &std::path::Path) -> bool {
+    d.join("Local State").is_file()
+        || d.join("User")
+            .join("globalStorage")
+            .join("state.vscdb")
+            .is_file()
+}
+
+/// Every directory Desktop's userData could live at, in preference
+/// order — the first one holding Electron state wins.
+fn candidate_dirs() -> Vec<PathBuf> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/"));
+    let mut bases: Vec<PathBuf> = Vec::new();
     #[cfg(windows)]
     {
-        if let Ok(app) = std::env::var("APPDATA") {
-            if !app.is_empty() {
-                return Some(PathBuf::from(app).join("Devin"));
+        for var in ["APPDATA", "LOCALAPPDATA"] {
+            if let Ok(v) = std::env::var(var) {
+                if !v.is_empty() {
+                    bases.push(PathBuf::from(v));
+                }
             }
         }
-        Some(home.join("AppData").join("Roaming").join("Devin"))
+        if bases.is_empty() {
+            bases.push(home.join("AppData").join("Roaming"));
+        }
     }
     #[cfg(target_os = "macos")]
     {
-        Some(
-            home.join("Library")
-                .join("Application Support")
-                .join("Devin"),
-        )
+        bases.push(home.join("Library").join("Application Support"));
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let base = std::env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join(".config"));
-        Some(base.join("Devin"))
+        bases.push(
+            std::env::var("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join(".config")),
+        );
     }
+    let mut out = Vec::new();
+    for b in bases {
+        for n in PRODUCT_DIRS {
+            out.push(b.join(n));
+        }
+    }
+    out
+}
+
+/// The actual userData dir. Resolve by the state DB itself — a
+/// skeleton dir holding only `Local State` (left behind by an older
+/// install or a short-lived run) must not shadow a product dir that
+/// has the real `state.vscdb`, and the os_crypt key lives in the SAME
+/// product dir as the db, so product_name/vault_key stay consistent.
+pub fn userdata_dir() -> Option<PathBuf> {
+    let has_db = |d: &PathBuf| {
+        d.join("User")
+            .join("globalStorage")
+            .join("state.vscdb")
+            .is_file()
+    };
+    candidate_dirs()
+        .into_iter()
+        .find(has_db)
+        .or_else(|| candidate_dirs().into_iter().find(|d| looks_like_userdata(d)))
+}
+
+/// Install dirs where a Desktop exe could live — used to detect
+/// "installed but never launched" (no userData exists yet).
+fn install_dirs() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Ok(l) = std::env::var("LOCALAPPDATA") {
+        for n in PRODUCT_DIRS {
+            let d = PathBuf::from(&l).join("Programs").join(n);
+            if d.is_dir() {
+                v.push(d);
+            }
+        }
+    }
+    for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Ok(pf) = std::env::var(var) {
+            for n in PRODUCT_DIRS {
+                let d = PathBuf::from(&pf).join(n);
+                if d.is_dir() {
+                    v.push(d);
+                }
+            }
+        }
+    }
+    v
 }
 
 /// The Electron state DB — exposed so callers can cache by its mtime.
+/// Only returned when the file itself exists.
 pub fn db_path() -> Option<PathBuf> {
-    userdata_dir().map(|d| d.join("User").join("globalStorage").join("state.vscdb"))
+    userdata_dir()
+        .map(|d| d.join("User").join("globalStorage").join("state.vscdb"))
+        .filter(|p| p.is_file())
 }
 
-/// Desktop has been run at least once (its state DB exists).
+/// Desktop is installed: state/userData exists, or an exe does (a
+/// fresh install that never ran has no userData yet).
 pub fn installed() -> bool {
-    db_path().map(|p| p.is_file()).unwrap_or(false)
+    if userdata_dir().is_some() {
+        return true;
+    }
+    install_dirs().iter().any(|d| {
+        std::fs::read_dir(d)
+            .map(|rd| {
+                rd.flatten().any(|e| {
+                    let n = e.file_name().to_string_lossy().to_lowercase();
+                    EXE_NAMES.contains(&n.as_str())
+                })
+            })
+            .unwrap_or(false)
+    })
 }
 
-/// Any Devin Desktop process alive right now. Case-sensitive on "Devin"
-/// (the CLI's binary is lowercase `devin`), plus an exe-path check so a
-/// renamed binary still counts.
+/// The product name owning the resolved userData ("Devin" or
+/// "Windsurf") — the processes that could hold state.vscdb open are
+/// that product's, not any devin-named binary.
+pub fn product_name() -> String {
+    userdata_dir()
+        .and_then(|d| d.file_name().map(|f| f.to_string_lossy().to_string()))
+        .unwrap_or_else(|| "Devin".to_string())
+}
+
+/// Any process of the Desktop product alive right now. Case-sensitive —
+/// the CLI's binary is lowercase `devin` and must NOT match; a real
+/// Windsurf IDE only counts when the userData resolved to Windsurf
+/// (then it genuinely holds that same state file open).
 pub fn is_running() -> bool {
+    let product = product_name();
+    let exe = format!("{product}.exe");
     let mut sys = sysinfo::System::new();
     sys.refresh_processes();
     sys.processes().values().any(|p| {
-        if p.name().starts_with("Devin") {
+        if p.name().starts_with(&product) {
             return true;
         }
         p.exe()
             .and_then(|e| e.file_name())
-            .map(|f| f == "Devin.exe")
+            .map(|f| f.to_string_lossy() == exe)
             .unwrap_or(false)
     })
 }
@@ -106,7 +200,8 @@ pub fn switch_session(
     let bufval = buffer_json(&sealed);
 
     let conn = rusqlite::Connection::open(&db)
-        .map_err(|e| format!("open state.vscdb: {e}"))?;
+        .map_err(|e| format!("open {}: {e}", db.display()))?;
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(3));
     let n = conn
         .execute(
             "UPDATE ItemTable SET value=?1 WHERE key=?2",
@@ -147,6 +242,47 @@ fn patch_json(
     );
 }
 
+/// Read-side connection to state.vscdb. Desktop keeps it in WAL mode,
+/// and a pure READ_ONLY open dies with SQLITE_CANTOPEN once the -shm
+/// file is gone (a read-only connection can neither create it nor run
+/// recovery) — the file can be right there and still "fail to open".
+/// Roaming-profile redirection produces the same symptom. Fall back to
+/// copying the db (+ -wal/-shm sidecars) to %TEMP% and opening the
+/// copy: WAL recovery runs normally there and every "exists but won't
+/// open" cause is sidestepped. Returns the temp dir to clean up.
+fn open_state_db(
+    db: &std::path::Path,
+) -> Result<(rusqlite::Connection, Option<PathBuf>), String> {
+    match rusqlite::Connection::open_with_flags(
+        db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) {
+        Ok(conn) => {
+            let _ = conn.busy_timeout(std::time::Duration::from_secs(3));
+            Ok((conn, None))
+        }
+        Err(e) => {
+            let tmp = std::env::temp_dir().join("devin-switch");
+            let _ = std::fs::create_dir_all(&tmp);
+            let dst = tmp.join("state.vscdb");
+            std::fs::copy(db, &dst).map_err(|e2| {
+                format!("open {}: {e} (temp copy: {e2})", db.display())
+            })?;
+            for side in ["wal", "shm"] {
+                let src = PathBuf::from(format!("{}-{side}", db.display()));
+                if src.is_file() {
+                    let _ = std::fs::copy(&src, tmp.join(format!("state.vscdb-{side}")));
+                }
+            }
+            let conn = rusqlite::Connection::open(&dst).map_err(|e2| {
+                format!("open {}: {e} (temp copy: {e2})", db.display())
+            })?;
+            let _ = conn.busy_timeout(std::time::Duration::from_secs(3));
+            Ok((conn, Some(tmp)))
+        }
+    }
+}
+
 /// What Desktop is currently signed in as — the first entry of the
 /// decrypted sessions secret. Read-only; safe while Desktop runs.
 #[derive(Clone)]
@@ -159,14 +295,19 @@ pub struct DesktopSession {
 pub fn current_session() -> Result<DesktopSession, String> {
     let db = db_path().ok_or("Devin Desktop data dir not found")?;
     let key = vault_key()?;
-    let conn = rusqlite::Connection::open_with_flags(
-        &db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| format!("open state.vscdb: {e}"))?;
-    // Desktop writes this DB while running — wait out short locks instead
-    // of failing with SQLITE_BUSY.
-    let _ = conn.busy_timeout(std::time::Duration::from_secs(3));
+    let (conn, tmp) = open_state_db(&db)?;
+    let res = session_from(&conn, &key);
+    drop(conn);
+    if let Some(d) = tmp {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    res
+}
+
+fn session_from(
+    conn: &rusqlite::Connection,
+    key: &[u8; 32],
+) -> Result<DesktopSession, String> {
     let raw: String = conn
         .query_row(
             "SELECT value FROM ItemTable WHERE key=?1",
@@ -181,7 +322,7 @@ pub fn current_session() -> Result<DesktopSession, String> {
         .and_then(|d| d.as_array())
         .map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect())
         .ok_or("sessions row isn't a Buffer")?;
-    let pt = open(&key, &bytes)?;
+    let pt = open(key, &bytes)?;
     let arr: Vec<serde_json::Value> =
         serde_json::from_slice(&pt).map_err(|e| format!("sessions JSON bad: {e}"))?;
     let s = arr.first().ok_or("Desktop has no session")?;

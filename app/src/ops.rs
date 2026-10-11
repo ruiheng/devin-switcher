@@ -28,7 +28,7 @@ pub struct Status {
     pub credentials_path: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DesktopNow {
     pub logged_in: bool,
     /// Display name straight from the session record.
@@ -38,6 +38,9 @@ pub struct DesktopNow {
     pub email: String,
     pub name: String,
     pub usage: Option<Usage>,
+    /// Why the session couldn't be read despite Desktop being installed
+    /// — surfaced in the UI so a broken detection isn't silent.
+    pub error: String,
 }
 
 /// `devin auth status` spawns the CLI — seconds on Windows — so UI polling
@@ -63,30 +66,48 @@ fn auth_status_cached() -> AuthStatus {
 }
 
 /// Desktop's session record, cached on state.vscdb's (mtime, len) — the
-/// decrypt is cheap but polling every 5s shouldn't redo it. The usage
-/// fetch is deliberately NOT cached here: it has its own 60s token cache
-/// and must keep refreshing even while the DB file sits unchanged.
-static DESK_CACHE: Mutex<Option<(Option<(SystemTime, u64)>, Option<desktop::DesktopSession>)>> =
-    Mutex::new(None);
+/// decrypt is cheap but polling every 5s shouldn't redo it. Ok results
+/// are trusted until the file changes; Err results are retried after
+/// 15s so a transient open failure (WAL recovery, roaming profile)
+/// self-heals instead of sticking forever. The usage fetch is
+/// deliberately NOT cached here: it has its own 60s token cache.
+static DESK_CACHE: Mutex<
+    Option<(
+        Option<(SystemTime, u64)>,
+        Result<desktop::DesktopSession, String>,
+        Instant,
+    )>,
+> = Mutex::new(None);
 
-fn desktop_now() -> Option<DesktopNow> {
-    let db = desktop::db_path()?;
+fn desktop_now() -> DesktopNow {
+    let Some(db) = desktop::db_path() else {
+        return DesktopNow {
+            error: "no state.vscdb under Devin/Windsurf AppData dirs".into(),
+            ..Default::default()
+        };
+    };
     let key = fs::metadata(&db)
         .and_then(|m| m.modified().map(|t| (t, m.len())))
         .ok();
     let session = {
         let mut g = DESK_CACHE.lock().unwrap();
-        match g.as_ref() {
-            Some((k, s)) if *k == key => s.clone(),
-            _ => {
-                let s = desktop::current_session().ok();
-                *g = Some((key, s.clone()));
-                s
-            }
+        let hit = g
+            .as_ref()
+            .map(|(k, r, at)| {
+                *k == key
+                    && (r.is_ok() || at.elapsed() < Duration::from_secs(15))
+            })
+            .unwrap_or(false);
+        if hit {
+            g.as_ref().unwrap().1.clone()
+        } else {
+            let r = desktop::current_session();
+            *g = Some((key, r.clone(), Instant::now()));
+            r
         }
     };
-    Some(match session {
-        Some(s) => {
+    match session {
+        Ok(s) => {
             let creds = login::credentials_toml(
                 &s.token,
                 "https://server.codeium.com",
@@ -102,17 +123,14 @@ fn desktop_now() -> Option<DesktopNow> {
                 email: u.as_ref().map(|x| x.email.clone()).unwrap_or_default(),
                 name: u.as_ref().map(|x| x.name.clone()).unwrap_or_default(),
                 usage: u,
+                error: String::new(),
             }
         }
-        None => DesktopNow {
-            logged_in: false,
-            label: String::new(),
-            user_id: String::new(),
-            email: String::new(),
-            name: String::new(),
-            usage: None,
+        Err(e) => DesktopNow {
+            error: e,
+            ..Default::default()
         },
-    })
+    }
 }
 
 pub fn status() -> Status {
@@ -122,7 +140,7 @@ pub fn status() -> Status {
     Status {
         auth: auth_status_cached(),
         usage,
-        desktop: desktop::installed().then(desktop_now).flatten(),
+        desktop: desktop::installed().then(desktop_now),
         running: running_devin_processes(),
         devin_installed: paths::devin_bin().is_some(),
         credentials_path: paths::credentials_path().display().to_string(),
@@ -234,13 +252,18 @@ pub fn running_devin_processes() -> Vec<String> {
     let mut seen = std::collections::BTreeMap::<String, u32>::new();
     #[cfg(unix)]
     let run_root = paths::run_dir();
+    // The Desktop product's processes (Devin* or Windsurf*, whichever
+    // owns the resolved userData) keep the OLD session until restart —
+    // a real Windsurf IDE only counts when it shares that store.
+    let product = desktop::product_name().to_lowercase();
     for p in sys.processes().values() {
         let name = p.name().to_lowercase();
         let base = name.trim_end_matches(".exe");
         let is_devin = base == "devin"
             || base == "devin desktop"
             || base.starts_with("devin helper")
-            || base == "devin.exe";
+            || base == "devin.exe"
+            || base.starts_with(&product);
         if !is_devin || base.contains("devin-switch") {
             continue;
         }
