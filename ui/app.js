@@ -17,6 +17,7 @@ const I18N = {
     bothTag: "CLI+DESKTOP",
     activeDesk: "DESKTOP",
     checking: "Checking…",
+    loading: "Loading…",
     notSignedIn: "Not signed in",
     cliNotFound: "devin CLI not found",
     signedIn: "Signed in",
@@ -114,6 +115,7 @@ const I18N = {
     bothTag: "CLI+桌面端",
     activeDesk: "桌面端",
     checking: "检查中…",
+    loading: "加载中…",
     notSignedIn: "未登录",
     cliNotFound: "找不到 devin CLI",
     signedIn: "已登录",
@@ -275,6 +277,10 @@ async function refresh(force = false) {
     renderProfiles(profiles, status, force);
   } catch (e) {
     toast(String(e), true);
+  } finally {
+    // First render dismisses the splash — data or error toast, either
+    // way the loading screen has served its purpose.
+    $("splash")?.classList.add("gone");
   }
 }
 

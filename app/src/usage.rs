@@ -68,6 +68,37 @@ struct Cached {
 }
 
 static CACHE: Mutex<Option<HashMap<String, Cached>>> = Mutex::new(None);
+static INFLIGHT: std::sync::LazyLock<
+    Mutex<std::collections::HashSet<String>>,
+> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
+/// Like [`user_status_cached`] but never blocks: a cold/expired cache
+/// spawns the fetch in the background and reports None — the next call
+/// picks up the result. Keeps first paint off the network.
+pub fn user_status_nonblocking(creds: &[u8]) -> Option<Usage> {
+    let (key, server) = creds_secrets(creds).ok()?;
+    {
+        let guard = CACHE.lock().unwrap();
+        if let Some(c) = guard.as_ref().and_then(|m| m.get(&key)) {
+            if c.at.elapsed() < CACHE_TTL {
+                return Some(c.usage.clone());
+            }
+        }
+    }
+    if INFLIGHT.lock().unwrap().insert(key.clone()) {
+        std::thread::spawn(move || {
+            if let Ok(usage) = user_status(&key, &server) {
+                CACHE
+                    .lock()
+                    .unwrap()
+                    .get_or_insert_with(HashMap::new)
+                    .insert(key.clone(), Cached { at: Instant::now(), usage });
+            }
+            INFLIGHT.lock().unwrap().remove(&key);
+        });
+    }
+    None
+}
 
 /// Cached variant for UI polling — same key returns fresh data for 60s.
 pub fn user_status_cached(creds: &[u8]) -> Result<Usage, String> {

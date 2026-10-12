@@ -115,7 +115,7 @@ fn desktop_now() -> DesktopNow {
                 "https://api.devin.ai",
             )
             .into_bytes();
-            let u = usage::user_status_cached(&creds).ok();
+            let u = usage::user_status_nonblocking(&creds);
             DesktopNow {
                 logged_in: true,
                 label: s.label,
@@ -136,7 +136,7 @@ fn desktop_now() -> DesktopNow {
 pub fn status() -> Status {
     let usage = fs::read(paths::credentials_path())
         .ok()
-        .and_then(|c| usage::user_status_cached(&c).ok());
+        .and_then(|c| usage::user_status_nonblocking(&c));
     Status {
         auth: auth_status_cached(),
         usage,

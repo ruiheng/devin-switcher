@@ -129,6 +129,135 @@ mod gui {
     pub async fn launch_parallel(name: String, cwd: Option<String>) -> Result<ParallelLaunch, String> {
         logged("launch_parallel", ops::launch_parallel(&name, cwd.as_deref()))
     }
+
+    /// Tray popup menu: current sign-in(s) as a disabled header, saved
+    /// accounts as check items whose id carries the switch scope
+    /// (`sw:<scope>:<name>` — mirrors the card's "only the missing side"
+    /// logic), then Show/Quit. Rebuilt on hover and after a switch.
+    pub fn tray_menu(
+        app: &tauri::AppHandle,
+    ) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+        use tauri::menu::{
+            CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem,
+        };
+        let st = ops::status();
+        let dsk = st.desktop.as_ref();
+        let dsk_in = dsk.map(|d| d.logged_in).unwrap_or(false);
+        // Same matching rule as the cards: user_id first, email fallback.
+        let dmatch = |user_id: &str, email: &str| {
+            dsk_in
+                && dsk
+                    .map(|d| {
+                        (!user_id.is_empty() && user_id == d.user_id)
+                            || (!d.email.is_empty()
+                                && !email.is_empty()
+                                && email == d.email)
+                    })
+                    .unwrap_or(false)
+        };
+        let who = |e: &str, n: &str| {
+            if !e.is_empty() { e.to_string() } else { n.to_string() }
+        };
+        let same = st.auth.logged_in && dmatch(&st.auth.user_id, &st.auth.email);
+
+        let mut heads: Vec<MenuItem<tauri::Wry>> = Vec::new();
+        if same {
+            heads.push(MenuItem::with_id(
+                app,
+                "cur",
+                format!("CLI+桌面端: {}", who(&st.auth.email, &st.auth.name)),
+                false,
+                None::<&str>,
+            )?);
+        } else {
+            let c = if st.auth.logged_in {
+                who(&st.auth.email, &st.auth.name)
+            } else {
+                "未登录".into()
+            };
+            heads.push(MenuItem::with_id(
+                app,
+                "cur_cli",
+                format!("CLI: {c}"),
+                false,
+                None::<&str>,
+            )?);
+            if let Some(d) = dsk {
+                let dl = if d.logged_in {
+                    who(&d.email, &d.label)
+                } else {
+                    "未登录".into()
+                };
+                heads.push(MenuItem::with_id(
+                    app,
+                    "cur_desk",
+                    format!("桌面端: {dl}"),
+                    false,
+                    None::<&str>,
+                )?);
+            }
+        }
+
+        let mut accts: Vec<CheckMenuItem<tauri::Wry>> = Vec::new();
+        for p in store::list().into_iter().take(12) {
+            let m = &p.meta;
+            let da = dmatch(&m.user_id, &m.email);
+            let (scope, tag) = match (p.is_active, da) {
+                (true, true) => ("none", " [CLI+桌面端]"),
+                (true, false) => ("desktop", " [CLI]"),
+                (false, true) => ("cli", " [桌面端]"),
+                (false, false) => ("all", ""),
+            };
+            // A check only means "live on BOTH sides" — two checked
+            // items (one CLI, one Desktop) read as a contradiction.
+            // Single-side liveness is conveyed by the [CLI]/[桌面端] tag.
+            accts.push(CheckMenuItem::with_id(
+                app,
+                format!("sw:{scope}:{}", p.name),
+                format!("{}{}", who(&m.email, &p.name), tag),
+                scope != "none",
+                p.is_active && da,
+                None::<&str>,
+            )?);
+        }
+
+        let show = MenuItem::with_id(app, "show", "打开 / Show", true, None::<&str>)?;
+        let quit = MenuItem::with_id(app, "quit", "退出 / Quit", true, None::<&str>)?;
+        let sep1 = PredefinedMenuItem::separator(app)?;
+        let sep2 = PredefinedMenuItem::separator(app)?;
+        let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = heads
+            .iter()
+            .map(|h| h as &dyn IsMenuItem<tauri::Wry>)
+            .collect();
+        items.push(&sep1);
+        items.extend(accts.iter().map(|a| a as &dyn IsMenuItem<tauri::Wry>));
+        items.push(&sep2);
+        items.push(&show);
+        items.push(&quit);
+        Menu::with_items(app, &items)
+    }
+
+    /// Rebuild the tray menu — throttled for the hover path (status is
+    /// cached but still not free), forced after a switch completes.
+    pub fn refresh_tray(app: &tauri::AppHandle, force: bool) {
+        static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+        {
+            let mut g = LAST.lock().unwrap();
+            if !force
+                && g.is_some_and(|t| {
+                    t.elapsed() < std::time::Duration::from_secs(3)
+                })
+            {
+                return;
+            }
+            *g = Some(std::time::Instant::now());
+        }
+        if let Some(tr) = app.tray_by_id("main-tray") {
+            if let Ok(m) = tray_menu(app) {
+                let _ = tr.set_menu(Some(m));
+            }
+        }
+    }
 }
 
 #[cfg(feature = "gui")]
@@ -137,14 +266,94 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Second launch → focus the existing window instead of
-            // running a duplicate poller.
+            // running a duplicate poller. It may be hidden in the tray.
             use tauri::Manager;
             if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
                 let _ = w.unminimize();
                 let _ = w.set_focus();
             }
         }))
         .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            use tauri::{
+                tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+                Manager, WindowEvent,
+            };
+            let raise = |app: &tauri::AppHandle| {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.unminimize();
+                    let _ = w.set_focus();
+                }
+            };
+            let menu = gui::tray_menu(app.handle())?;
+            TrayIconBuilder::with_id("main-tray")
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("Devin Switch")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(move |app, e| {
+                    let id = e.id.as_ref();
+                    if id == "quit" {
+                        app.exit(0);
+                    } else if id == "show" {
+                        raise(app);
+                    } else if let Some((scope, name)) =
+                        id.strip_prefix("sw:").and_then(|r| r.split_once(':'))
+                    {
+                        if scope != "none" {
+                            let (app2, scope, name) =
+                                (app.clone(), scope.to_string(), name.to_string());
+                            std::thread::spawn(move || {
+                                if let Err(e) = crate::ops::use_profile(&name, &scope) {
+                                    crate::ops::log_error("tray_switch", &e);
+                                }
+                                gui::refresh_tray(&app2, true);
+                            });
+                        }
+                    }
+                })
+                .on_tray_icon_event(|tray, event| match event {
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } => {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.unminimize();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    // Hover refresh keeps the menu's sign-in/account
+                    // state current when the popup actually opens.
+                    TrayIconEvent::Enter { .. } => {
+                        gui::refresh_tray(tray.app_handle(), false)
+                    }
+                    _ => {}
+                })
+                .build(app)?;
+            if let Some(w) = app.get_webview_window("main") {
+                let win = w.clone();
+                w.on_window_event(move |event| match event {
+                    // Close AND minimize both park the window in the
+                    // tray — real Quit lives on the tray menu.
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = win.hide();
+                    }
+                    WindowEvent::Resized(_) => {
+                        if win.is_minimized().unwrap_or(false) {
+                            let _ = win.hide();
+                        }
+                    }
+                    _ => {}
+                });
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             gui::get_status,
             gui::list_profiles,
