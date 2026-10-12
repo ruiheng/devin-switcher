@@ -301,6 +301,7 @@ function renderStatus(s) {
       (dsk.email && s.auth.email === dsk.email));
 
   const d = $("dotCli");
+  d.classList.toggle("both", same);
   $("tagCli").textContent = same ? t("bothTag") : t("cliTag");
   if (s.auth && s.auth.logged_in) {
     d.classList.add("on");
@@ -513,8 +514,23 @@ function renderProfiles(profiles, status, force = false) {
     // accounts saved before we recorded user_id.
     const deskActive = deskOf(p);
     const bothActive = p.is_active && deskActive;
+    // Switching a side that's already on this account is a no-op — the
+    // button targets only the side(s) that aren't live yet.
+    const mainScope = !p.is_active
+      ? deskActive
+        ? "cli"
+        : "all"
+      : "desktop";
     const card = document.createElement("div");
-    card.className = "profile" + (p.is_active ? " active" : "");
+    card.className =
+      "profile" +
+      (bothActive
+        ? " active-both"
+        : p.is_active
+          ? " active"
+          : deskActive
+            ? " active-desk"
+            : "");
     if (!bothActive) {
       card.classList.add("switchable");
       card.title = t("swHint");
@@ -539,11 +555,21 @@ function renderProfiles(profiles, status, force = false) {
       ${
         bothActive
           ? ""
-          : `<div class="actions"><span class="splitbtn"><button class="use" data-act="use">${t("swUse")}</button><button class="use caret" data-act="usemenu" title="${t("swMore")}">▾</button></span><button data-act="par">${t("swPar")}</button></div>`
+          : `<div class="actions"><span class="splitbtn"><button class="use" data-act="use">${t(
+              mainScope === "all"
+                ? "swUse"
+                : mainScope === "cli"
+                  ? "swScopeCli"
+                  : "swScopeDesktop",
+            )}</button>${
+              mainScope === "all"
+                ? `<button class="use caret" data-act="usemenu" title="${t("swMore")}">▾</button>`
+                : ""
+            }</span><button data-act="par">${t("swPar")}</button></div>`
       }`;
     const useBtn = card.querySelector('[data-act="use"]');
     if (useBtn)
-      useBtn.onclick = () => pend(card, () => useProfile(p.name, "all"));
+      useBtn.onclick = () => pend(card, () => useProfile(p.name, mainScope));
     const menuBtn = card.querySelector('[data-act="usemenu"]');
     if (menuBtn)
       menuBtn.onclick = (e) => {
@@ -585,7 +611,7 @@ function renderProfiles(profiles, status, force = false) {
     if (!bothActive) {
       card.ondblclick = (e) => {
         if (e.target.closest("button, input, .menu")) return;
-        pend(card, () => useProfile(p.name, "all"));
+        pend(card, () => useProfile(p.name, mainScope));
       };
     }
     el.appendChild(card);
