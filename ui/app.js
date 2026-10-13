@@ -419,9 +419,29 @@ function quotaHtml(u) {
       `${t("overage")} ${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(2)}`
     );
   }
-  if (u.plan_end) foot.push(`${t("planEnds")} ${esc(u.plan_end.slice(0, 10))}`);
+  if (u.plan_end) {
+    const ts = Date.parse(u.plan_end);
+    if (isNaN(ts)) {
+      foot.push(`${t("planEnds")} ${esc(u.plan_end.slice(0, 10))}`);
+    } else {
+      const unix = Math.floor(ts / 1000);
+      const soon = ts - Date.now() < 7 * 864e5;
+      foot.push(
+        `<span class="${soon ? "soon" : ""}">${t("planEnds")} ` +
+          `${esc(u.plan_end.slice(0, 10))} · ` +
+          `<span data-planend="${unix}">${planDays(unix)}</span></span>`
+      );
+    }
+  }
   if (foot.length) rows.push(`<div class="qfoot">${foot.join(" · ")}</div>`);
   return rows.join("");
+}
+
+// Days remaining on a plan-end timestamp — day granularity, the same
+// 1s ticker keeps it fresh and flips it to warn under 7 days.
+function planDays(unix) {
+  const d = Math.ceil((unix - Date.now() / 1000) / 86400);
+  return `${Math.max(0, d)}d`;
 }
 
 const r2 = (f) => Math.round(f * 100) / 100;
@@ -974,6 +994,14 @@ document.addEventListener("click", (e) => {
 setInterval(() => {
   document.querySelectorAll("[data-reset]").forEach((el) => {
     el.textContent = resetText(+el.dataset.reset);
+  });
+  document.querySelectorAll("[data-planend]").forEach((el) => {
+    const unix = +el.dataset.planend;
+    el.textContent = planDays(unix);
+    el.parentElement.classList.toggle(
+      "soon",
+      unix * 1000 - Date.now() < 7 * 864e5
+    );
   });
 }, 1000);
 

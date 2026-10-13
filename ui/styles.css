@@ -103,6 +103,7 @@ header { position: relative; }
 .qval { color: var(--sub); white-space: nowrap; }
 .reset { font-variant-numeric: tabular-nums; }
 .qfoot { font-size: 11px; color: var(--sub); margin-top: 2px; }
+.qfoot .soon { color: var(--amber); }
 
 main { padding: 14px 18px; overflow-y: auto; flex: 1; }
 
