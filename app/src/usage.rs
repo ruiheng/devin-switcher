@@ -72,20 +72,25 @@ static INFLIGHT: std::sync::LazyLock<
     Mutex<std::collections::HashSet<String>>,
 > = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
 
-/// Like [`user_status_cached`] but never blocks: a cold/expired cache
-/// spawns the fetch in the background and reports None — the next call
-/// picks up the result. Keeps first paint off the network.
+/// Like [`user_status_cached`] but never blocks — and never blinks:
+/// a fresh hit returns as-is; a STALE hit is still returned while a
+/// background fetch refreshes the cache (stale-while-revalidate), so
+/// the quota area doesn't empty out for a fetch round-trip. Only a
+/// true cache miss reports None.
 pub fn user_status_nonblocking(creds: &[u8]) -> Option<Usage> {
     let (key, server) = creds_secrets(creds).ok()?;
-    {
+    let cached = {
         let guard = CACHE.lock().unwrap();
-        if let Some(c) = guard.as_ref().and_then(|m| m.get(&key)) {
-            if c.at.elapsed() < CACHE_TTL {
-                return Some(c.usage.clone());
-            }
-        }
-    }
-    if INFLIGHT.lock().unwrap().insert(key.clone()) {
+        guard
+            .as_ref()
+            .and_then(|m| m.get(&key))
+            .map(|c| (c.usage.clone(), c.at))
+    };
+    let fresh = cached
+        .as_ref()
+        .map(|(_, at)| at.elapsed() < CACHE_TTL)
+        .unwrap_or(false);
+    if !fresh && INFLIGHT.lock().unwrap().insert(key.clone()) {
         std::thread::spawn(move || {
             if let Ok(usage) = user_status(&key, &server) {
                 CACHE
@@ -97,7 +102,7 @@ pub fn user_status_nonblocking(creds: &[u8]) -> Option<Usage> {
             INFLIGHT.lock().unwrap().remove(&key);
         });
     }
-    None
+    cached.map(|(u, _)| u)
 }
 
 /// Cached variant for UI polling — same key returns fresh data for 60s.
