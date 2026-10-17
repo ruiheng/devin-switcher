@@ -169,6 +169,19 @@ main { padding: 14px 18px; overflow-y: auto; flex: 1; }
   background: rgba(63,185,80,.15); color: var(--green);
   border: 1px solid rgba(63,185,80,.4); font-weight: 600;
 }
+.plantag {
+  font-size: 10px; padding: 0 6px; border-radius: 20px;
+  border: 1px solid var(--border); color: var(--sub);
+  font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+}
+.plantag.pro {
+  color: var(--accent2);
+  border-color: rgba(91,108,255,.45); background: rgba(91,108,255,.12);
+}
+.plantag.max {
+  color: var(--amber);
+  border-color: rgba(210,153,34,.5); background: rgba(210,153,34,.13);
+}
 .badge.desk {
   background: rgba(91,108,255,.14); color: var(--accent2);
   border-color: rgba(91,108,255,.45);

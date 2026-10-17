@@ -313,9 +313,9 @@ function renderStatus(s) {
     d.classList.add("on");
     $("labelCli").textContent = s.auth.email || s.auth.name || t("signedIn");
     $("labelCli").dataset.copy = s.auth.email || "";
-    $("subCli").textContent = [
-      s.auth.name && s.auth.name !== s.auth.email ? s.auth.name : null,
-      s.auth.plan || s.auth.tier,
+    $("subCli").innerHTML = [
+      s.auth.name && s.auth.name !== s.auth.email ? esc(s.auth.name) : null,
+      planTag(s.auth.plan || s.auth.tier),
     ]
       .filter(Boolean)
       .join(" · ");
@@ -341,11 +341,11 @@ function renderStatus(s) {
       s.desktop.email || s.desktop.name || s.desktop.label || t("signedIn");
     $("labelDesktop").dataset.copy = s.desktop.email || "";
     const plan = s.desktop.usage?.plan || s.desktop.usage?.tier;
-    $("subDesktop").textContent = [
+    $("subDesktop").innerHTML = [
       (s.desktop.name || s.desktop.label) !== s.desktop.email
-        ? s.desktop.name || s.desktop.label
+        ? esc(s.desktop.name || s.desktop.label)
         : null,
-      plan,
+      planTag(plan),
     ]
       .filter(Boolean)
       .join(" · ");
@@ -445,6 +445,18 @@ function planDays(unix) {
 }
 
 const r2 = (f) => Math.round(f * 100) / 100;
+
+// Plan tier chip: free stays muted, pro = accent, max = gold.
+function planTag(plan) {
+  if (!plan) return "";
+  const p = plan.toLowerCase();
+  const cls = /max|ultra/.test(p)
+    ? "max"
+    : /pro|team|business/.test(p)
+      ? "pro"
+      : "";
+  return `<span class="plantag ${cls}">${esc(plan)}</span>`;
+}
 
 // Relative reset — <24h is a live HH:MM:SS countdown (a bare date is
 // useless for a daily window), <8d is "Nd Nh", farther out a date.
@@ -567,7 +579,7 @@ function renderProfiles(profiles, status, force = false) {
         <span class="name copyable" title="${esc(t("copyHint"))}">${esc(
           p.email || p.display_name || p.name
         )}</span>
-        ${p.plan ? `<span class="sub">${esc(p.plan)}</span>` : ""}
+        ${planTag(p.plan)}
         <span class="pname" title="${esc(t("renHint"))}">@${esc(p.name)}</span>
         ${p.is_active ? `<span class="badge">${t("cliTag")}</span>` : ""}
         ${deskActive ? `<span class="badge desk">${t("desktopTag")}</span>` : ""}
