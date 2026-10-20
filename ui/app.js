@@ -22,6 +22,7 @@ const I18N = {
     cliNotFound: "devin CLI not found",
     signedIn: "Signed in",
     addAccount: "+ Add account",
+    tierOther: "OTHER",
     addTitle: "Add account",
     tabLogin: "Browser sign-in",
     tabCurrent: "Save current",
@@ -120,6 +121,7 @@ const I18N = {
     cliNotFound: "找不到 devin CLI",
     signedIn: "已登录",
     addAccount: "+ 添加账号",
+    tierOther: "其他",
     addTitle: "添加账号",
     tabLogin: "浏览器登录",
     tabCurrent: "保存当前",
@@ -244,6 +246,17 @@ let activeSaved = false;
 // Filter box state + last poll results — typing re-renders without a
 // backend round-trip.
 let filterQuery = "";
+// Tier chips toggle which plan tiers are visible. Persisted as the
+// hidden set; migrates the older freeFilter/hideFree settings.
+let hiddenTiers = new Set(
+  (localStorage.getItem("hiddenTiers") || "").split(",").filter(Boolean)
+);
+{
+  const ff = localStorage.getItem("freeFilter");
+  if (ff === "hide" || localStorage.getItem("hideFree") === "1")
+    hiddenTiers.add("FREE");
+  if (ff === "only") ["MAX", "PRO", "OTHER"].forEach((k) => hiddenTiers.add(k));
+}
 let lastProfiles = [];
 let lastStatus = null;
 
@@ -519,14 +532,48 @@ function renderProfiles(profiles, status, force = false) {
     return;
   }
   el.innerHTML = "";
+  // Tier census of ALL saved accounts — each present tier is a toggle
+  // chip: lit = shown, dimmed = filtered out.
+  const tierOf = (plan) =>
+    /max|ultra/i.test(plan || "")
+      ? "MAX"
+      : /pro|team|business/i.test(plan || "")
+        ? "PRO"
+        : /free/i.test(plan || "")
+          ? "FREE"
+          : "OTHER";
+  const counts = {};
+  profiles.forEach((p) => {
+    const k = tierOf(p.plan);
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  const tc = $("tierCounts");
+  tc.innerHTML = profiles.length ? `${profiles.length} ` : "";
+  ["MAX", "PRO", "FREE", "OTHER"]
+    .filter((k) => counts[k])
+    .forEach((k) => {
+      const c = document.createElement("span");
+      c.className =
+        `tierchip ${k.toLowerCase()}` + (hiddenTiers.has(k) ? "" : " on");
+      c.textContent = `${k === "OTHER" ? t("tierOther") : k} ${counts[k]}`;
+      c.onclick = (e) => {
+        e.stopPropagation();
+        if (hiddenTiers.has(k)) hiddenTiers.delete(k);
+        else hiddenTiers.add(k);
+        localStorage.setItem("hiddenTiers", [...hiddenTiers].join(","));
+        renderProfiles(lastProfiles, lastStatus, true);
+      };
+      tc.appendChild(c);
+    });
   const q = filterQuery.trim().toLowerCase();
-  const shown = q
-    ? profiles.filter((p) =>
+  const shown = profiles.filter(
+    (p) =>
+      !hiddenTiers.has(tierOf(p.plan)) &&
+      (!q ||
         [p.email, p.name, p.display_name].some(
           (f) => f && f.toLowerCase().includes(q)
-        )
-      )
-    : profiles;
+        ))
+  );
   // A card for the live account renders the SAME usage object the banner
   // shows — the banner refreshes every ~60s while meta snapshots can be
   // 5min stale, so without this the same account could show two numbers.

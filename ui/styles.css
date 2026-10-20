@@ -104,6 +104,16 @@ header { position: relative; }
 .reset { font-variant-numeric: tabular-nums; }
 .qfoot { font-size: 11px; color: var(--sub); margin-top: 2px; }
 .qfoot .soon { color: var(--amber); }
+.tierc { margin: 0 6px 0 10px; font-size: 10.5px; letter-spacing: 0; text-transform: none; display: inline-flex; align-items: center; gap: 5px; }
+.tierchip {
+  padding: 1px 8px; border-radius: 20px; cursor: pointer; user-select: none;
+  border: 1px solid var(--border); color: var(--sub); font-weight: 600;
+  opacity: .55; transition: opacity .15s;
+}
+.tierchip.on { opacity: 1; }
+.tierchip.max.on { color: var(--amber); border-color: rgba(210,153,34,.5); background: rgba(210,153,34,.13); }
+.tierchip.pro.on { color: var(--accent2); border-color: rgba(91,108,255,.45); background: rgba(91,108,255,.12); }
+.tierchip.free.on, .tierchip.other.on { color: var(--text); border-color: var(--sub); background: rgba(139,147,163,.12); }
 
 main { padding: 14px 18px; overflow-y: auto; flex: 1; }
 
@@ -128,7 +138,7 @@ main { padding: 14px 18px; overflow-y: auto; flex: 1; }
   border-bottom: 1px solid var(--border);
 }
 .filter {
-  margin-left: 10px; padding: 2px 8px; font-size: 11.5px; width: 130px;
+  margin-left: 10px; padding: 2px 8px; font-size: 11.5px; width: 96px;
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 6px; color: var(--text);
 }
