@@ -80,7 +80,7 @@ static INFLIGHT: std::sync::LazyLock<
 pub fn user_status_nonblocking(creds: &[u8]) -> Option<Usage> {
     let (key, server) = creds_secrets(creds).ok()?;
     let cached = {
-        let guard = CACHE.lock().unwrap();
+        let guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
         guard
             .as_ref()
             .and_then(|m| m.get(&key))
@@ -90,16 +90,16 @@ pub fn user_status_nonblocking(creds: &[u8]) -> Option<Usage> {
         .as_ref()
         .map(|(_, at)| at.elapsed() < CACHE_TTL)
         .unwrap_or(false);
-    if !fresh && INFLIGHT.lock().unwrap().insert(key.clone()) {
+    if !fresh && INFLIGHT.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone()) {
         std::thread::spawn(move || {
             if let Ok(usage) = user_status(&key, &server) {
                 CACHE
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(|e| e.into_inner())
                     .get_or_insert_with(HashMap::new)
                     .insert(key.clone(), Cached { at: Instant::now(), usage });
             }
-            INFLIGHT.lock().unwrap().remove(&key);
+            INFLIGHT.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
         });
     }
     cached.map(|(u, _)| u)
@@ -109,7 +109,7 @@ pub fn user_status_nonblocking(creds: &[u8]) -> Option<Usage> {
 pub fn user_status_cached(creds: &[u8]) -> Result<Usage, String> {
     let (key, server) = creds_secrets(creds)?;
     {
-        let guard = CACHE.lock().unwrap();
+        let guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(map) = guard.as_ref() {
             if let Some(c) = map.get(&key) {
                 if c.at.elapsed() < CACHE_TTL {
@@ -121,7 +121,7 @@ pub fn user_status_cached(creds: &[u8]) -> Result<Usage, String> {
     let usage = user_status(&key, &server)?;
     CACHE
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get_or_insert_with(HashMap::new)
         .insert(
             key,

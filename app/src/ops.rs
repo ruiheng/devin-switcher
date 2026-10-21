@@ -50,18 +50,28 @@ pub struct DesktopNow {
 static AUTH_CACHE: Mutex<Option<(Option<(SystemTime, u64)>, AuthStatus)>> =
     Mutex::new(None);
 
+/// Lock guard that shrugs off poisoning — a single panic while holding
+/// a cache lock must not turn every later lock() into an abort.
+fn mg<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn auth_status_cached() -> AuthStatus {
     let key = fs::metadata(paths::credentials_path())
         .and_then(|m| m.modified().map(|t| (t, m.len())))
         .ok();
-    let mut g = AUTH_CACHE.lock().unwrap();
-    if let Some((k, st)) = g.as_ref() {
-        if *k == key {
-            return st.clone();
+    {
+        let g = mg(&AUTH_CACHE);
+        if let Some((k, st)) = g.as_ref() {
+            if *k == key {
+                return st.clone();
+            }
         }
     }
+    // The CLI spawn happens OUTSIDE the lock — slow and fallible work
+    // inside a cache's critical section is a poison vector.
     let st = devincli::auth_status(None).unwrap_or_default();
-    *g = Some((key, st.clone()));
+    *mg(&AUTH_CACHE) = Some((key, st.clone()));
     st
 }
 
@@ -90,20 +100,24 @@ fn desktop_now() -> DesktopNow {
         .and_then(|m| m.modified().map(|t| (t, m.len())))
         .ok();
     let session = {
-        let mut g = DESK_CACHE.lock().unwrap();
-        let hit = g
-            .as_ref()
-            .map(|(k, r, at)| {
-                *k == key
-                    && (r.is_ok() || at.elapsed() < Duration::from_secs(15))
-            })
-            .unwrap_or(false);
-        if hit {
-            g.as_ref().unwrap().1.clone()
-        } else {
-            let r = desktop::current_session();
-            *g = Some((key, r.clone(), Instant::now()));
-            r
+        let cached = {
+            let g = mg(&DESK_CACHE);
+            g.as_ref()
+                .filter(|(k, r, at)| {
+                    *k == key
+                        && (r.is_ok() || at.elapsed() < Duration::from_secs(15))
+                })
+                .map(|(_, r, _)| r.clone())
+        };
+        match cached {
+            Some(r) => r,
+            None => {
+                // sqlite+DPAPI+decrypt runs OUTSIDE the lock — a panic
+                // here must not poison the cache for every later poll.
+                let r = desktop::current_session();
+                *mg(&DESK_CACHE) = Some((key, r.clone(), Instant::now()));
+                r
+            }
         }
     };
     match session {
@@ -160,7 +174,7 @@ pub fn auto_refresh_stale() {
             continue;
         }
         {
-            let mut tried = REFRESH_TRIED.lock().unwrap();
+            let mut tried = mg(&REFRESH_TRIED);
             let map = tried.get_or_insert_with(HashMap::new);
             if map
                 .get(&p.name)
@@ -172,7 +186,7 @@ pub fn auto_refresh_stale() {
             map.insert(p.name.clone(), Instant::now());
         }
         {
-            let mut inflight = REFRESHING.lock().unwrap();
+            let mut inflight = mg(&REFRESHING);
             if !inflight.insert(p.name.clone()) {
                 continue;
             }
@@ -180,7 +194,7 @@ pub fn auto_refresh_stale() {
         let name = p.name.clone();
         std::thread::spawn(move || {
             let _ = refresh_usage(&name);
-            REFRESHING.lock().unwrap().remove(&name);
+            mg(&REFRESHING).remove(&name);
         });
     }
 }

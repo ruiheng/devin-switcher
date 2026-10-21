@@ -67,7 +67,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 static SESSIONS: Mutex<Option<HashMap<u64, Session>>> = Mutex::new(None);
 
 fn sessions() -> std::sync::MutexGuard<'static, Option<HashMap<u64, Session>>> {
-    SESSIONS.lock().unwrap()
+    SESSIONS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Exchange the callback code for a session token (same call the CLI makes)

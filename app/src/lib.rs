@@ -104,7 +104,7 @@ mod gui {
     pub async fn manual_start() -> String {
         let m = login::manual_start();
         let url = m.url.clone();
-        *MANUAL.lock().unwrap() = Some(m);
+        *MANUAL.lock().unwrap_or_else(|e| e.into_inner()) = Some(m);
         url
     }
 
@@ -115,9 +115,14 @@ mod gui {
         if code.starts_with("devin-session-token") {
             return ops::add_token(&name, &code);
         }
-        let m = MANUAL.lock().unwrap().take().ok_or_else(|| {
-            "no manual login in progress — click the link button first".to_string()
-        })?;
+        let m = MANUAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .ok_or_else(|| {
+                "no manual login in progress — click the link button first"
+                    .to_string()
+            })?;
         let creds = login::manual_finish(&m, &code).map_err(|e| {
             ops::log_error("manual_finish", &e);
             e
@@ -242,7 +247,7 @@ mod gui {
     pub fn refresh_tray(app: &tauri::AppHandle, force: bool) {
         static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
         {
-            let mut g = LAST.lock().unwrap();
+            let mut g = LAST.lock().unwrap_or_else(|e| e.into_inner());
             if !force
                 && g.is_some_and(|t| {
                     t.elapsed() < std::time::Duration::from_secs(3)
@@ -263,6 +268,12 @@ mod gui {
 #[cfg(feature = "gui")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Release GUI builds have no console and WER only records the
+    // exception code (0xc0000409) — route panics into errors.log so a
+    // crash is diagnosable after the fact.
+    std::panic::set_hook(Box::new(|info| {
+        ops::log_error("panic", &info.to_string());
+    }));
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Second launch → focus the existing window instead of
