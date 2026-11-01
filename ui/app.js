@@ -437,12 +437,18 @@ function quotaHtml(u) {
     if (isNaN(ts)) {
       foot.push(`${t("planEnds")} ${esc(u.plan_end.slice(0, 10))}`);
     } else {
+      const d = new Date(ts);
+      const when =
+        `${String(d.getMonth() + 1).padStart(2, "0")}-` +
+        `${String(d.getDate()).padStart(2, "0")} ` +
+        `${String(d.getHours()).padStart(2, "0")}:` +
+        `${String(d.getMinutes()).padStart(2, "0")}`;
       const unix = Math.floor(ts / 1000);
       const soon = ts - Date.now() < 7 * 864e5;
       foot.push(
         `<span class="${soon ? "soon" : ""}">${t("planEnds")} ` +
-          `${esc(u.plan_end.slice(0, 10))} · ` +
-          `<span data-planend="${unix}">${planDays(unix)}</span></span>`
+          `${when} · ` +
+          `<span data-planend="${unix}">${planLeft(unix)}</span></span>`
       );
     }
   }
@@ -450,11 +456,19 @@ function quotaHtml(u) {
   return rows.join("");
 }
 
-// Days remaining on a plan-end timestamp — day granularity, the same
-// 1s ticker keeps it fresh and flips it to warn under 7 days.
-function planDays(unix) {
-  const d = Math.ceil((unix - Date.now() / 1000) / 86400);
-  return `${Math.max(0, d)}d`;
+// Precise plan-end countdown — the API stamps a full RFC3339 instant,
+// not just a date, so granularity tightens as expiry nears: ≥7d shows
+// days, <7d adds hours, <1d is h+m, <1h is minutes. The same 1s ticker
+// keeps it fresh and flips the parent to warn under 7 days.
+function planLeft(unix) {
+  const s = Math.max(0, Math.ceil(unix - Date.now() / 1000));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d >= 7) return `${d}d`;
+  if (d >= 1) return `${d}d ${h}h`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}h ${m}m`;
+  return `${m}m`;
 }
 
 const r2 = (f) => Math.round(f * 100) / 100;
@@ -1056,7 +1070,7 @@ setInterval(() => {
   });
   document.querySelectorAll("[data-planend]").forEach((el) => {
     const unix = +el.dataset.planend;
-    el.textContent = planDays(unix);
+    el.textContent = planLeft(unix);
     el.parentElement.classList.toggle(
       "soon",
       unix * 1000 - Date.now() < 7 * 864e5
