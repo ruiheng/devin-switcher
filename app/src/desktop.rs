@@ -185,9 +185,6 @@ pub fn switch_session(
     email: &str,
 ) -> Result<(), String> {
     let db = db_path().ok_or("Devin Desktop data dir not found")?;
-    if !db.is_file() {
-        return Err("Devin Desktop data dir not found".into());
-    }
     let key = vault_key()?;
 
     let sessions = serde_json::json!([{

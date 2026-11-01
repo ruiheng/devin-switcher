@@ -6,7 +6,7 @@ use std::path::PathBuf;
 //   unix:    $XDG_DATA_HOME/devin  (default ~/.local/share/devin)
 //   windows: %APPDATA%/devin
 // credentials.toml and config.json live directly inside it.
-// Devin Desktop's userData is ~/.devin on every platform.
+// Devin Desktop's userData is resolved in desktop.rs.
 
 fn env_nonempty(key: &str) -> Option<String> {
     env::var(key).ok().filter(|v| !v.is_empty())
@@ -19,23 +19,27 @@ fn home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// Devin's data root (contains credentials.toml), honoring XDG on unix and
-/// APPDATA on windows — the same override the CLI itself uses.
-pub fn devin_data_dir() -> PathBuf {
+/// The per-user data root both devin and our vault hang off of —
+/// %APPDATA% on windows, XDG_DATA_HOME (or ~/.local/share) on unix.
+fn data_base() -> PathBuf {
     #[cfg(windows)]
     {
-        if let Some(app) = env_nonempty("APPDATA") {
-            return PathBuf::from(app).join("devin");
-        }
-        return home().join("AppData").join("Roaming").join("devin");
+        env_nonempty("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home().join("AppData").join("Roaming"))
     }
     #[cfg(not(windows))]
     {
-        let base = env_nonempty("XDG_DATA_HOME")
+        env_nonempty("XDG_DATA_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|| home().join(".local").join("share"));
-        base.join("devin")
+            .unwrap_or_else(|| home().join(".local").join("share"))
     }
+}
+
+/// Devin's data root (contains credentials.toml), honoring XDG on unix and
+/// APPDATA on windows — the same override the CLI itself uses.
+pub fn devin_data_dir() -> PathBuf {
+    data_base().join("devin")
 }
 
 pub fn credentials_path() -> PathBuf {
@@ -47,14 +51,7 @@ pub fn credentials_path() -> PathBuf {
 pub fn config_path() -> PathBuf {
     #[cfg(windows)]
     {
-        if let Some(app) = env_nonempty("APPDATA") {
-            return PathBuf::from(app).join("devin").join("config.json");
-        }
-        return home()
-            .join("AppData")
-            .join("Roaming")
-            .join("devin")
-            .join("config.json");
+        devin_data_dir().join("config.json")
     }
     #[cfg(not(windows))]
     {
@@ -68,20 +65,7 @@ pub fn config_path() -> PathBuf {
 /// Our own vault. Same convention as devin's data dir so everything stays
 /// together; holds profiles/ and run/ subdirectories.
 pub fn vault_dir() -> PathBuf {
-    #[cfg(windows)]
-    {
-        if let Some(app) = env_nonempty("APPDATA") {
-            return PathBuf::from(app).join("devin-switch");
-        }
-        return home().join("AppData").join("Roaming").join("devin-switch");
-    }
-    #[cfg(not(windows))]
-    {
-        let base = env_nonempty("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home().join(".local").join("share"));
-        base.join("devin-switch")
-    }
+    data_base().join("devin-switch")
 }
 
 pub fn profiles_dir() -> PathBuf {

@@ -31,7 +31,7 @@ fn meta_file(dir: &Path) -> PathBuf {
 }
 
 /// Write a file so a crash can't leave a torn credentials.toml behind.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, bytes).map_err(|e| format!("write {}: {e}", tmp.display()))?;
     #[cfg(unix)]
@@ -127,6 +127,16 @@ fn meta_of(dir: &Path) -> Meta {
         .unwrap_or_default()
 }
 
+/// One profile's meta without a full vault scan.
+pub fn meta(name: &str) -> Option<Meta> {
+    let name = sanitize_name(name).ok()?;
+    let dir = paths::profile_dir(&name);
+    if !dir.exists() {
+        return None;
+    }
+    Some(meta_of(&dir))
+}
+
 fn info(name: &str) -> ProfileInfo {
     let dir = paths::profile_dir(name);
     let meta = meta_of(&dir);
@@ -141,6 +151,7 @@ fn info(name: &str) -> ProfileInfo {
         name: name.to_string(),
         meta,
         is_active: active,
+        desktop_active: false,
     }
 }
 

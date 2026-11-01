@@ -125,7 +125,15 @@ fn main() -> ExitCode {
                 } else {
                     "all"
                 };
-                ops::use_profile(n, scope)
+                // The sentinel is for the GUI's matcher — humans get words.
+                ops::use_profile(n, scope).map_err(|e| {
+                    if e == "devin_desktop_running" {
+                        "Devin Desktop is running — quit it fully, then switch again (or use --cli)"
+                            .to_string()
+                    } else {
+                        e
+                    }
+                })
             })
             .map(|r| {
                 let who = if r.auth.logged_in {

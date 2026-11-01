@@ -41,6 +41,16 @@ pub struct DesktopNow {
     /// Why the session couldn't be read despite Desktop being installed
     /// — surfaced in the UI so a broken detection isn't silent.
     pub error: String,
+    /// Desktop and the CLI are signed in as the same account.
+    pub same_as_cli: bool,
+}
+
+/// One matching rule for "Desktop session == this account" — user_id
+/// first, email fallback for accounts saved before user_id was recorded.
+pub fn desktop_matches(d: &DesktopNow, user_id: &str, email: &str) -> bool {
+    d.logged_in
+        && ((!user_id.is_empty() && user_id == d.user_id)
+            || (!d.email.is_empty() && !email.is_empty() && email == d.email))
 }
 
 /// `devin auth status` spawns the CLI — seconds on Windows — so UI polling
@@ -122,13 +132,7 @@ fn desktop_now() -> DesktopNow {
     };
     match session {
         Ok(s) => {
-            let creds = login::credentials_toml(
-                &s.token,
-                "https://server.codeium.com",
-                "app.devin.ai",
-                "https://api.devin.ai",
-            )
-            .into_bytes();
+            let creds = login::token_credentials(&s.token);
             let u = usage::user_status_nonblocking(&creds);
             DesktopNow {
                 logged_in: true,
@@ -138,6 +142,7 @@ fn desktop_now() -> DesktopNow {
                 name: u.as_ref().map(|x| x.name.clone()).unwrap_or_default(),
                 usage: u,
                 error: String::new(),
+                same_as_cli: false,
             }
         }
         Err(e) => DesktopNow {
@@ -147,18 +152,45 @@ fn desktop_now() -> DesktopNow {
     }
 }
 
+/// The live pair: CLI auth + Desktop session (None when Desktop isn't
+/// installed), with Desktop's same_as_cli flag resolved against it.
+/// status() and the tray both need this; pulling it out keeps the
+/// matching rule in exactly one place.
+pub fn live() -> (AuthStatus, Option<DesktopNow>) {
+    let auth = auth_status_cached();
+    let mut desktop = desktop::installed().then(desktop_now);
+    if let Some(d) = &mut desktop {
+        d.same_as_cli = auth.logged_in && desktop_matches(d, &auth.user_id, &auth.email);
+    }
+    (auth, desktop)
+}
+
 pub fn status() -> Status {
     let usage = fs::read(paths::credentials_path())
         .ok()
         .and_then(|c| usage::user_status_nonblocking(&c));
+    let (auth, desktop) = live();
     Status {
-        auth: auth_status_cached(),
+        auth,
         usage,
-        desktop: desktop::installed().then(desktop_now),
+        desktop,
         running: running_devin_processes(),
         devin_installed: paths::devin_bin().is_some(),
         credentials_path: paths::credentials_path().display().to_string(),
     }
+}
+
+/// Saved profiles with Desktop-liveness resolved — what the GUI's card
+/// list and the tray menu both render.
+pub fn list_profiles() -> Vec<ProfileInfo> {
+    let mut profiles = store::list();
+    if desktop::installed() {
+        let d = desktop_now();
+        for p in &mut profiles {
+            p.desktop_active = desktop_matches(&d, &p.meta.user_id, &p.meta.email);
+        }
+    }
+    profiles
 }
 
 /// Kick a background quota refresh for profiles whose snapshot is stale
@@ -257,6 +289,27 @@ fn meta_from(u: Usage, org: Option<String>, note: &str) -> Meta {
     }
 }
 
+/// Re-save a profile's meta after a fresh fetch, keeping the history the
+/// snapshot can't know: original created_at and a note we weren't given.
+fn resave(
+    name: &str,
+    creds: &[u8],
+    u: Usage,
+    org: Option<String>,
+    note: &str,
+) -> Result<ProfileInfo, String> {
+    let mut m = meta_from(u, org, note);
+    if let Some(old) = store::meta(name) {
+        if !old.created_at.is_empty() {
+            m.created_at = old.created_at;
+        }
+        if m.note.is_empty() {
+            m.note = old.note;
+        }
+    }
+    store::save(name, creds, &m)
+}
+
 /// devin CLI sessions and Devin Desktop processes currently running — i.e.
 /// what would keep using the old account until restarted. Sessions launched
 /// under our fake homes (parallel mode) are excluded.
@@ -276,7 +329,6 @@ pub fn running_devin_processes() -> Vec<String> {
         let is_devin = base == "devin"
             || base == "devin desktop"
             || base.starts_with("devin helper")
-            || base == "devin.exe"
             || base.starts_with(&product);
         if !is_devin || base.contains("devin-switch") {
             continue;
@@ -354,14 +406,7 @@ fn save_account(
     } else {
         store::sanitize_name(want)?
     };
-    let mut m = meta_from(u, org, note);
-    if let Some(old) = store::list().into_iter().find(|p| p.name == name) {
-        m.created_at = old.meta.created_at;
-        if m.note.is_empty() {
-            m.note = old.meta.note;
-        }
-    }
-    store::save(&name, creds, &m)
+    resave(&name, creds, u, org, note)
 }
 
 /// Save whatever the CLI is currently signed in as.
@@ -435,13 +480,7 @@ pub fn import_desktop(name: &str) -> Result<ProfileInfo, String> {
 }
 
 fn add_token_named(name: &str, token: &str) -> Result<ProfileInfo, String> {
-    let creds = login::credentials_toml(
-        token,
-        "https://server.codeium.com",
-        "app.devin.ai",
-        "https://api.devin.ai",
-    )
-    .into_bytes();
+    let creds = login::token_credentials(token);
     let (key, server) = usage::creds_secrets(&creds)?;
     let u = usage::user_status(&key, &server).map_err(|e| format!("token not recognized: {e}"))?;
     if u.email.is_empty() && u.name.is_empty() {
@@ -457,11 +496,7 @@ fn add_token_named(name: &str, token: &str) -> Result<ProfileInfo, String> {
 pub fn use_profile(name: &str, scope: &str) -> Result<UseResult, String> {
     let name = store::sanitize_name(name)?;
     let creds = store::creds_of(&name)?;
-    let meta = store::list()
-        .into_iter()
-        .find(|p| p.name == name)
-        .map(|p| p.meta)
-        .unwrap_or_default();
+    let meta = store::meta(&name).unwrap_or_default();
     let want_cli = scope != "desktop";
     let want_desktop = scope != "cli";
 
@@ -485,14 +520,7 @@ pub fn use_profile(name: &str, scope: &str) -> Result<UseResult, String> {
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let tmp = target.with_extension("tmp");
-        fs::write(&tmp, &creds).map_err(|e| format!("write credentials: {e}"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
-        }
-        fs::rename(&tmp, &target).map_err(|e| format!("rename credentials: {e}"))?;
+        store::write_atomic(&target, &creds)?;
 
         config::apply_org_id(org.as_deref())?;
     }
@@ -519,9 +547,7 @@ pub fn use_profile(name: &str, scope: &str) -> Result<UseResult, String> {
     // Refresh the stored meta from whatever we just learned.
     if let Some(u) = &u {
         if !u.email.is_empty() || !u.plan.is_empty() {
-            let mut m = meta_from(u.clone(), org.clone(), &meta.note);
-            m.created_at = meta.created_at.clone();
-            let _ = store::save(&name, &creds, &m);
+            let _ = resave(&name, &creds, u.clone(), org.clone(), &meta.note);
         }
     }
 
@@ -564,16 +590,10 @@ pub fn use_profile(name: &str, scope: &str) -> Result<UseResult, String> {
 pub fn refresh_usage(name: &str) -> Result<ProfileInfo, String> {
     let name = store::sanitize_name(name)?;
     let creds = store::creds_of(&name)?;
-    let meta = store::list()
-        .into_iter()
-        .find(|p| p.name == name)
-        .map(|p| p.meta)
-        .unwrap_or_default();
+    let meta = store::meta(&name).unwrap_or_default();
     let (key, server) = usage::creds_secrets(&creds)?;
     let u = usage::user_status(&key, &server)?;
-    let mut m = meta_from(u, meta.org_id, &meta.note);
-    m.created_at = meta.created_at;
-    store::save(&name, &creds, &m)
+    resave(&name, &creds, u, meta.org_id, "")
 }
 
 /// Launch a devin session that runs under an isolated data home, so it can
@@ -714,6 +734,26 @@ fn open_terminal(cmdline: &str, cwd: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_match_rules() {
+        let d = DesktopNow {
+            logged_in: true,
+            user_id: "user-1".into(),
+            email: "a@x.com".into(),
+            ..Default::default()
+        };
+        assert!(desktop_matches(&d, "user-1", ""));
+        assert!(desktop_matches(&d, "user-1", "b@x.com"), "user_id wins");
+        assert!(desktop_matches(&d, "", "a@x.com"), "email fallback");
+        assert!(!desktop_matches(&d, "", ""));
+        assert!(!desktop_matches(&d, "other", "b@x.com"));
+        let out = DesktopNow {
+            logged_in: false,
+            ..d.clone()
+        };
+        assert!(!desktop_matches(&out, "user-1", "a@x.com"));
+    }
 
     /// End-to-end switch mechanics against sandboxed dirs — never touches
     /// the real sign-in. Windows reads APPDATA, unix reads XDG_* (the same

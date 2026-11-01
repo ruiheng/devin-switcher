@@ -28,6 +28,8 @@ pub struct ProfileInfo {
     pub meta: Meta,
     /// credentials.toml bytes equal the CLI's current file.
     pub is_active: bool,
+    /// Devin Desktop is signed in as this account.
+    pub desktop_active: bool,
 }
 
 /// Parsed `devin auth status`.

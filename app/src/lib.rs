@@ -36,7 +36,7 @@ mod gui {
     #[tauri::command]
     pub async fn list_profiles() -> Vec<ProfileInfo> {
         ops::auto_refresh_stale();
-        store::list()
+        ops::list_profiles()
     }
 
     #[tauri::command]
@@ -67,7 +67,7 @@ mod gui {
     #[tauri::command]
     pub async fn refresh_all() -> Vec<ProfileInfo> {
         ops::refresh_all();
-        store::list()
+        ops::list_profiles()
     }
 
     #[tauri::command]
@@ -145,38 +145,27 @@ mod gui {
         use tauri::menu::{
             CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem,
         };
-        let st = ops::status();
-        let dsk = st.desktop.as_ref();
-        let dsk_in = dsk.map(|d| d.logged_in).unwrap_or(false);
-        // Same matching rule as the cards: user_id first, email fallback.
-        let dmatch = |user_id: &str, email: &str| {
-            dsk_in
-                && dsk
-                    .map(|d| {
-                        (!user_id.is_empty() && user_id == d.user_id)
-                            || (!d.email.is_empty()
-                                && !email.is_empty()
-                                && email == d.email)
-                    })
-                    .unwrap_or(false)
-        };
+        // ops::live skips status()'s full process scan — the tray only
+        // needs the sign-in pair, not the restart-needed list.
+        let (auth, desktop) = ops::live();
+        let dsk = desktop.as_ref();
         let who = |e: &str, n: &str| {
             if !e.is_empty() { e.to_string() } else { n.to_string() }
         };
-        let same = st.auth.logged_in && dmatch(&st.auth.user_id, &st.auth.email);
+        let same = dsk.map(|d| d.same_as_cli).unwrap_or(false);
 
         let mut heads: Vec<MenuItem<tauri::Wry>> = Vec::new();
         if same {
             heads.push(MenuItem::with_id(
                 app,
                 "cur",
-                format!("CLI+桌面端: {}", who(&st.auth.email, &st.auth.name)),
+                format!("CLI+桌面端: {}", who(&auth.email, &auth.name)),
                 false,
                 None::<&str>,
             )?);
         } else {
-            let c = if st.auth.logged_in {
-                who(&st.auth.email, &st.auth.name)
+            let c = if auth.logged_in {
+                who(&auth.email, &auth.name)
             } else {
                 "未登录".into()
             };
@@ -204,9 +193,9 @@ mod gui {
         }
 
         let mut accts: Vec<CheckMenuItem<tauri::Wry>> = Vec::new();
-        for p in store::list().into_iter().take(12) {
+        for p in ops::list_profiles().into_iter().take(12) {
             let m = &p.meta;
-            let da = dmatch(&m.user_id, &m.email);
+            let da = p.desktop_active;
             let (scope, tag) = match (p.is_active, da) {
                 (true, true) => ("none", " [CLI+桌面端]"),
                 (true, false) => ("desktop", " [CLI]"),
@@ -263,6 +252,16 @@ mod gui {
             }
         }
     }
+
+    /// Pop the main window back up — shown, unminimized, focused.
+    pub fn raise(app: &tauri::AppHandle) {
+        use tauri::Manager;
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+    }
 }
 
 #[cfg(feature = "gui")]
@@ -278,25 +277,13 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Second launch → focus the existing window instead of
             // running a duplicate poller. It may be hidden in the tray.
-            use tauri::Manager;
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.unminimize();
-                let _ = w.set_focus();
-            }
+            gui::raise(app);
         }))
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             use tauri::{
                 tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-                Manager, WindowEvent,
-            };
-            let raise = |app: &tauri::AppHandle| {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.unminimize();
-                    let _ = w.set_focus();
-                }
+                Emitter, Manager, WindowEvent,
             };
             let menu = gui::tray_menu(app.handle())?;
             TrayIconBuilder::with_id("main-tray")
@@ -309,7 +296,7 @@ pub fn run() {
                     if id == "quit" {
                         app.exit(0);
                     } else if id == "show" {
-                        raise(app);
+                        gui::raise(app);
                     } else if let Some((scope, name)) =
                         id.strip_prefix("sw:").and_then(|r| r.split_once(':'))
                     {
@@ -317,8 +304,12 @@ pub fn run() {
                             let (app2, scope, name) =
                                 (app.clone(), scope.to_string(), name.to_string());
                             std::thread::spawn(move || {
+                                // A silent click that does nothing reads
+                                // as a dead menu — raise + toast the error.
                                 if let Err(e) = crate::ops::use_profile(&name, &scope) {
                                     crate::ops::log_error("tray_switch", &e);
+                                    gui::raise(&app2);
+                                    let _ = app2.emit("tray-error", e.clone());
                                 }
                                 gui::refresh_tray(&app2, true);
                             });
@@ -331,17 +322,15 @@ pub fn run() {
                         button_state: MouseButtonState::Up,
                         ..
                     } => {
-                        let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.unminimize();
-                            let _ = w.set_focus();
-                        }
+                        gui::raise(tray.app_handle());
                     }
                     // Hover refresh keeps the menu's sign-in/account
-                    // state current when the popup actually opens.
+                    // state current when the popup actually opens — off
+                    // the event thread, since the auth check can spawn
+                    // `devin auth status` and take seconds.
                     TrayIconEvent::Enter { .. } => {
-                        gui::refresh_tray(tray.app_handle(), false)
+                        let app = tray.app_handle().clone();
+                        std::thread::spawn(move || gui::refresh_tray(&app, false));
                     }
                     _ => {}
                 })

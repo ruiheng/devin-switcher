@@ -20,6 +20,16 @@ const EXCHANGE_URL: &str =
     "https://server.codeium.com/exa.seat_management_pb.SeatManagementService/ExchangeDevinCLIPKCECode";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
 
+pub const DEFAULT_SERVER: &str = "https://server.codeium.com";
+pub const DEFAULT_WEBAPP: &str = "app.devin.ai";
+pub const DEFAULT_API: &str = "https://api.devin.ai";
+
+/// credentials.toml bytes for a bare session token against the default
+/// endpoints.
+pub fn token_credentials(token: &str) -> Vec<u8> {
+    credentials_toml(token, DEFAULT_SERVER, DEFAULT_WEBAPP, DEFAULT_API).into_bytes()
+}
+
 fn b64url(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
@@ -108,9 +118,9 @@ fn exchange(code: &str, verifier: &str, redirect: &str) -> Result<Vec<u8>, Strin
         .ok_or("Devin's exchange returned no session token")?;
     Ok(credentials_toml(
         &key,
-        "https://server.codeium.com",
-        res.webapp.as_deref().unwrap_or("app.devin.ai"),
-        res.api.as_deref().unwrap_or("https://api.devin.ai"),
+        DEFAULT_SERVER,
+        res.webapp.as_deref().unwrap_or(DEFAULT_WEBAPP),
+        res.api.as_deref().unwrap_or(DEFAULT_API),
     )
     .into_bytes())
 }

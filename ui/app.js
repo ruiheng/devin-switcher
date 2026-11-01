@@ -278,7 +278,24 @@ function toast(msg, isErr = false) {
   }
 }
 
+// Backend sentinels → friendly text; everything else passes through.
+const errText = (e) => {
+  const s = String(e);
+  return s === "devin_desktop_running" ? t("swQuitDesktop") : s;
+};
+
+// A tray-menu switch that failed (e.g. Desktop still running) — the
+// backend raises the window first, so the toast lands somewhere visible.
+window.__TAURI__.event.listen("tray-error", (e) =>
+  toast(errText(e.payload), true)
+);
+
+// Set for the duration of a refresh — the 5s tick skips when one is
+// already in flight (explicit refresh() calls run regardless).
+let refreshing = false;
+
 async function refresh(force = false) {
+  refreshing = true;
   try {
     const [status, profiles] = await Promise.all([
       invoke("get_status"),
@@ -291,6 +308,7 @@ async function refresh(force = false) {
   } catch (e) {
     toast(String(e), true);
   } finally {
+    refreshing = false;
     // First render dismisses the splash — data or error toast, either
     // way the loading screen has served its purpose.
     $("splash")?.classList.add("gone");
@@ -312,12 +330,8 @@ async function pend(el, fn) {
 function renderStatus(s) {
   const dsk = s.desktop && s.desktop.logged_in ? s.desktop : null;
   // Same account on both sides → merge into one row tagged CLI+DESKTOP;
-  // a duplicated "same account" row is noise.
-  const same =
-    dsk &&
-    s.auth?.logged_in &&
-    ((s.auth.user_id && s.auth.user_id === dsk.user_id) ||
-      (dsk.email && s.auth.email === dsk.email));
+  // a duplicated "same account" row is noise. The backend decides.
+  const same = !!(dsk && s.desktop.same_as_cli);
 
   const d = $("dotCli");
   d.classList.toggle("both", same);
@@ -337,7 +351,7 @@ function renderStatus(s) {
     $("labelCli").textContent = t("notSignedIn");
     $("subCli").textContent = s.devin_installed ? "" : t("cliNotFound");
   }
-  $("quotaCli").innerHTML = quotaHtml(s.usage || dsk?.usage);
+  $("quotaCli").innerHTML = quotaHtml(s.usage || (same ? dsk.usage : null));
 
   // Desktop row only exists when Desktop is installed AND signed in as a
   // different account — otherwise the merged row covers it.
@@ -353,7 +367,7 @@ function renderStatus(s) {
     $("labelDesktop").textContent =
       s.desktop.email || s.desktop.name || s.desktop.label || t("signedIn");
     $("labelDesktop").dataset.copy = s.desktop.email || "";
-    const plan = s.desktop.usage?.plan || s.desktop.usage?.tier;
+    const plan = s.desktop.usage?.plan;
     $("subDesktop").innerHTML = [
       (s.desktop.name || s.desktop.label) !== s.desktop.email
         ? esc(s.desktop.name || s.desktop.label)
@@ -473,15 +487,21 @@ function planLeft(unix) {
 
 const r2 = (f) => Math.round(f * 100) / 100;
 
+// The one tier rule — plan chips (class) and filter chips (key) share it.
+function tierOf(plan) {
+  return /max|ultra/i.test(plan || "")
+    ? "MAX"
+    : /pro|team|business/i.test(plan || "")
+      ? "PRO"
+      : /free/i.test(plan || "")
+        ? "FREE"
+        : "OTHER";
+}
+
 // Plan tier chip: free stays muted, pro = accent, max = gold.
 function planTag(plan) {
   if (!plan) return "";
-  const p = plan.toLowerCase();
-  const cls = /max|ultra/.test(p)
-    ? "max"
-    : /pro|team|business/.test(p)
-      ? "pro"
-      : "";
+  const cls = { MAX: "max", PRO: "pro" }[tierOf(plan)] || "";
   return `<span class="plantag ${cls}">${esc(plan)}</span>`;
 }
 
@@ -526,7 +546,6 @@ function renderProfiles(profiles, status, force = false) {
   const active = profiles.find((p) => p.is_active);
   signedIn = !!status?.auth?.logged_in;
   activeSaved = !!active;
-  const dsk = status?.desktop?.logged_in ? status.desktop : null;
   // Don't clobber an in-progress rename, armed delete, or busy card on
   // the 5s poll — an action's own refresh passes force to bypass this.
   if (!force && el.querySelector(".rename-in, .danger.armed, .busy, .menu"))
@@ -548,14 +567,6 @@ function renderProfiles(profiles, status, force = false) {
   el.innerHTML = "";
   // Tier census of ALL saved accounts — each present tier is a toggle
   // chip: lit = shown, dimmed = filtered out.
-  const tierOf = (plan) =>
-    /max|ultra/i.test(plan || "")
-      ? "MAX"
-      : /pro|team|business/i.test(plan || "")
-        ? "PRO"
-        : /free/i.test(plan || "")
-          ? "FREE"
-          : "OTHER";
   const counts = {};
   profiles.forEach((p) => {
     const k = tierOf(p.plan);
@@ -591,13 +602,9 @@ function renderProfiles(profiles, status, force = false) {
   // A card for the live account renders the SAME usage object the banner
   // shows — the banner refreshes every ~60s while meta snapshots can be
   // 5min stale, so without this the same account could show two numbers.
-  const deskOf = (p) =>
-    dsk &&
-    ((p.user_id && p.user_id === dsk.user_id) ||
-      (dsk.email && p.email === dsk.email));
   const usageOf = (p) => {
     if (p.is_active) return status?.usage ?? p.usage;
-    if (deskOf(p)) return status?.desktop?.usage ?? p.usage;
+    if (p.desktop_active) return status?.desktop?.usage ?? p.usage;
     return p.usage;
   };
   const sorted = [...shown].sort(
@@ -611,7 +618,7 @@ function renderProfiles(profiles, status, force = false) {
     // A profile can be live on CLI, on Desktop, on both (fully switched),
     // or neither. Match Desktop by user_id, falling back to email for
     // accounts saved before we recorded user_id.
-    const deskActive = deskOf(p);
+    const deskActive = p.desktop_active;
     const bothActive = p.is_active && deskActive;
     // Switching a side that's already on this account is a no-op — the
     // button targets only the side(s) that aren't live yet.
@@ -750,8 +757,7 @@ async function useProfile(name, scope) {
     else toast(t("switchedTo", who));
     refresh(true);
   } catch (e) {
-    const s = String(e);
-    toast(s === "devin_desktop_running" ? t("swQuitDesktop") : s, true);
+    toast(errText(e), true);
   }
 }
 
@@ -770,7 +776,7 @@ async function parallel(name) {
 
 // Copy on click — WebView2's navigator.clipboard exists but can reject
 // without clipboard permission, so keep the execCommand fallback.
-function copyText(s) {
+function copyText(s, msg) {
   const legacy = () => {
     const ta = document.createElement("textarea");
     ta.value = s;
@@ -781,17 +787,15 @@ function copyText(s) {
     document.execCommand("copy");
     ta.remove();
   };
+  const done = () => toast(msg || t("copied"));
   if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(s).then(
-      () => toast(t("copied")),
-      () => {
-        legacy();
-        toast(t("copied"));
-      }
-    );
+    navigator.clipboard.writeText(s).then(done, () => {
+      legacy();
+      done();
+    });
   } else {
     legacy();
-    toast(t("copied"));
+    done();
   }
 }
 
@@ -959,14 +963,8 @@ $("openTokenUrl").onclick = () => {
   if (url) open(url).catch(() => {});
 };
 
-$("copyTokenUrl").onclick = async () => {
-  try {
-    await navigator.clipboard.writeText($("tokenUrl").value);
-    toast(t("linkCopied"));
-  } catch {
-    $("tokenUrl").select();
-  }
-};
+$("copyTokenUrl").onclick = () =>
+  copyText($("tokenUrl").value, t("linkCopied"));
 
 $("saveToken").onclick = (e) =>
   pend(e.currentTarget, async () => {
@@ -992,7 +990,7 @@ $("startLogin").onclick = (e) =>
       $("loginHint").textContent = offer.hint;
       $("startLogin").classList.add("hidden");
       $("loginWait").classList.remove("hidden");
-      loginTimer = setInterval(pollLogin, 600);
+      loginTimer = setTimeout(pollLogin, 600);
     } catch (err) {
       toast(String(err), true);
     }
@@ -1003,26 +1001,13 @@ $("openUrl").onclick = () => {
   if (url) open(url).catch(() => {});
 };
 
-$("copyUrl").onclick = async () => {
-  try {
-    await navigator.clipboard.writeText($("loginUrl").value);
-    toast(t("linkCopied"));
-  } catch {
-    $("loginUrl").select();
-  }
-};
+$("copyUrl").onclick = () =>
+  copyText($("loginUrl").value, t("linkCopied"));
 
 $("openLogout").onclick = () => {
   open(LOGOUT_URL).catch(() => {});
 };
-$("copyLogout").onclick = async () => {
-  try {
-    await navigator.clipboard.writeText(LOGOUT_URL);
-    toast(t("linkCopied"));
-  } catch {
-    toast(LOGOUT_URL);
-  }
-};
+$("copyLogout").onclick = () => copyText(LOGOUT_URL, t("linkCopied"));
 
 $("cancelLogin").onclick = () => {
   if (loginId != null) invoke("cancel_login", { id: loginId }).catch(() => {});
@@ -1031,25 +1016,32 @@ $("cancelLogin").onclick = () => {
 
 function stopLogin() {
   loginId = null;
-  clearInterval(loginTimer);
+  clearTimeout(loginTimer);
   $("startLogin").classList.remove("hidden");
   $("loginWait").classList.add("hidden");
 }
 
+// Self-scheduling, not setInterval — a new poll must never fire while the
+// previous one is still awaiting (GotCreds removes the session server-side,
+// so an overlapping poll sees "no such login session").
 async function pollLogin() {
   if (loginId == null) return;
+  const id = loginId;
   try {
-    const r = await invoke("poll_login", { id: loginId, name: "", note: "" });
+    const r = await invoke("poll_login", { id, name: "", note: "" });
     if (r.kind === "done") {
       toast(t("signedInAs", r.profile.email || r.profile.name));
       stopLogin();
       closeSheet();
       refresh(true);
-    } else if (r.kind === "working") {
+      return;
+    }
+    if (r.kind === "working") {
       document.querySelector("#loginWait .wait-text").textContent =
         t("finishing");
     }
-    // "waiting" → keep polling
+    // "waiting"/"working" → next poll, only if this round is still live
+    if (loginId === id) loginTimer = setTimeout(pollLogin, 600);
   } catch (e) {
     toast(String(e), true);
     stopLogin();
@@ -1079,4 +1071,6 @@ setInterval(() => {
 }, 1000);
 
 applyI18n();
-setInterval(refresh, 5000);
+setInterval(() => {
+  if (!refreshing) refresh();
+}, 5000);

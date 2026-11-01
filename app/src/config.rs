@@ -48,27 +48,10 @@ pub fn apply_org_id(org_id: Option<&str>) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let tmp = path.with_extension("json.tmp");
-    fs::write(
-        &tmp,
-        serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?,
+    crate::store::write_atomic(
+        &path,
+        serde_json::to_string_pretty(&v)
+            .map_err(|e| e.to_string())?
+            .as_bytes(),
     )
-    .map_err(|e| format!("write config.json: {e}"))?;
-    fs::rename(&tmp, &path).map_err(|e| format!("rename config.json: {e}"))
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn json_shape() {
-        let mut v = serde_json::json!({"agent": {}, "devin": {"org_id": "org-1"}});
-        {
-            let d = v["devin"].as_object_mut().unwrap();
-            d.insert("org_id".into(), serde_json::json!("org-2"));
-        }
-        assert_eq!(v["devin"]["org_id"], "org-2");
-        let d = v["devin"].as_object_mut().unwrap();
-        d.remove("org_id");
-        assert!(d.is_empty());
-    }
 }

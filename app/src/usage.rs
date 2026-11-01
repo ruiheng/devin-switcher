@@ -58,7 +58,7 @@ pub fn creds_secrets(creds: &[u8]) -> Result<(String, String), String> {
         .ok_or("credentials.toml has no api key")?;
     let server = server
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "https://server.codeium.com".to_string());
+        .unwrap_or_else(|| crate::login::DEFAULT_SERVER.to_string());
     Ok((key, server))
 }
 
@@ -93,11 +93,7 @@ pub fn user_status_nonblocking(creds: &[u8]) -> Option<Usage> {
     if !fresh && INFLIGHT.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone()) {
         std::thread::spawn(move || {
             if let Ok(usage) = user_status(&key, &server) {
-                CACHE
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .get_or_insert_with(HashMap::new)
-                    .insert(key.clone(), Cached { at: Instant::now(), usage });
+                cache_put(key.clone(), usage);
             }
             INFLIGHT.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
         });
@@ -119,18 +115,16 @@ pub fn user_status_cached(creds: &[u8]) -> Result<Usage, String> {
         }
     }
     let usage = user_status(&key, &server)?;
+    cache_put(key, usage.clone());
+    Ok(usage)
+}
+
+fn cache_put(key: String, usage: Usage) {
     CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get_or_insert_with(HashMap::new)
-        .insert(
-            key,
-            Cached {
-                at: Instant::now(),
-                usage: usage.clone(),
-            },
-        );
-    Ok(usage)
+        .insert(key, Cached { at: Instant::now(), usage });
 }
 
 /// Proto-JSON emits int64s as strings — accept either shape.
@@ -187,6 +181,12 @@ pub fn user_status(key: &str, server: &str) -> Result<Usage, String> {
         .body_mut()
         .read_json()
         .map_err(|e| format!("GetUserStatus reply unreadable: {e}"))?;
+    parse_user_status(&body)
+}
+
+/// GetUserStatus's JSON body → Usage. Proto-JSON quirks live here:
+/// int64s arrive as strings, spent windows drop their percent field.
+fn parse_user_status(body: &serde_json::Value) -> Result<Usage, String> {
     if let Some(code) = body.get("code").and_then(|c| c.as_str()) {
         if code == "unauthenticated" {
             return Err("Devin's sign-in has expired — sign in again".into());
@@ -269,5 +269,43 @@ mod tests {
         let c = b"windsurf_api_key = \"tok\"\n";
         let (_, s) = creds_secrets(c).unwrap();
         assert_eq!(s, "https://server.codeium.com");
+    }
+
+    #[test]
+    fn parse_max_hides_daily() {
+        let body = serde_json::json!({"userStatus":{"email":"m@x.com","name":"M","userId":"user-1","planStatus":{"planInfo":{"planName":"Max","hideDailyQuota":true,"devinInfo":{"orgId":"org-1"}},"planStart":"2026-10-02T15:59:59Z","planEnd":"2026-11-02T15:59:59Z","dailyQuotaRemainingPercent":100,"weeklyQuotaRemainingPercent":15,"overageBalanceMicros":"-63845","dailyQuotaResetAtUnix":"1793260800","weeklyQuotaResetAtUnix":"1793520000"}}});
+        let u = parse_user_status(&body).unwrap();
+        assert_eq!(u.plan, "Max");
+        assert_eq!(u.org_id.as_deref(), Some("org-1"));
+        assert!(u.plan_end.is_some());
+        assert_eq!(u.daily_left, None);
+        assert_eq!(u.daily_reset_unix, None);
+        assert_eq!(u.weekly_left, Some(15.0));
+        assert_eq!(u.weekly_reset_unix, Some(1793520000));
+        assert_eq!(u.overage_micros, Some(-63845.0));
+    }
+
+    #[test]
+    fn parse_free() {
+        let body = serde_json::json!({"userStatus":{"email":"f@x.com","userId":"user-2","planStatus":{"planInfo":{"planName":"Free","devinInfo":{"orgId":""}},"availablePromptCredits":2500,"dailyQuotaRemainingPercent":100,"weeklyQuotaRemainingPercent":100,"dailyQuotaResetAtUnix":"1793606400","weeklyQuotaResetAtUnix":"1794124800"}}});
+        let u = parse_user_status(&body).unwrap();
+        assert_eq!(u.plan_end, None);
+        assert_eq!(u.org_id, None, "empty org filtered");
+        assert_eq!(u.daily_left, Some(100.0));
+    }
+
+    #[test]
+    fn parse_spent_weekly() {
+        let body = serde_json::json!({"userStatus":{"email":"f@x.com","userId":"user-2","planStatus":{"planInfo":{"planName":"Free","devinInfo":{"orgId":""}},"availablePromptCredits":2500,"dailyQuotaRemainingPercent":100,"dailyQuotaResetAtUnix":"1793606400","weeklyQuotaResetAtUnix":"1794124800"}}});
+        let u = parse_user_status(&body).unwrap();
+        assert_eq!(u.weekly_left, Some(0.0));
+    }
+
+    #[test]
+    fn parse_errors() {
+        let body = serde_json::json!({"code":"unauthenticated","message":"x"});
+        assert!(parse_user_status(&body).unwrap_err().contains("sign in again"));
+        let body = serde_json::json!({"code":"internal","message":"boom"});
+        assert!(parse_user_status(&body).unwrap_err().contains("internal"));
     }
 }
