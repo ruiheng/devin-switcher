@@ -159,12 +159,26 @@ pub fn product_name() -> String {
 /// the CLI's binary is lowercase `devin` and must NOT match; a real
 /// Windsurf IDE only counts when the userData resolved to Windsurf
 /// (then it genuinely holds that same state file open).
+///
+/// Electron marks every child (renderer/gpu/crashpad) with a `--type=`
+/// arg; only the main process lacks it. Children imply a live main
+/// process anyway, and crashpad is designed to OUTLIVE the app — count
+/// only the main process or a quit Desktop still looks "running".
 pub fn is_running() -> bool {
     let product = product_name();
     let exe = format!("{product}.exe");
     let mut sys = sysinfo::System::new();
-    sys.refresh_processes();
+    // refresh_processes() doesn't fetch cmd — without it every Electron
+    // helper looks like the main process and is_running() lies.
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessRefreshKind::new()
+            .with_cmd(sysinfo::UpdateKind::Always)
+            .with_exe(sysinfo::UpdateKind::OnlyIfNotSet),
+    );
     sys.processes().values().any(|p| {
+        if p.cmd().iter().any(|a| a.starts_with("--type=")) {
+            return false;
+        }
         if p.name().starts_with(&product) {
             return true;
         }

@@ -315,7 +315,10 @@ fn resave(
 /// under our fake homes (parallel mode) are excluded.
 pub fn running_devin_processes() -> Vec<String> {
     let mut sys = sysinfo::System::new();
-    sys.refresh_processes();
+    let kind = sysinfo::ProcessRefreshKind::new().with_cmd(sysinfo::UpdateKind::Always);
+    #[cfg(unix)]
+    let kind = kind.with_environ(sysinfo::UpdateKind::OnlyIfNotSet);
+    sys.refresh_processes_specifics(kind);
     let mut seen = std::collections::BTreeMap::<String, u32>::new();
     #[cfg(unix)]
     let run_root = paths::run_dir();
@@ -331,6 +334,13 @@ pub fn running_devin_processes() -> Vec<String> {
             || base.starts_with("devin helper")
             || base.starts_with(&product);
         if !is_devin || base.contains("devin-switch") {
+            continue;
+        }
+        // crashpad lingers after the app exits and holds no session.
+        if p.cmd()
+            .iter()
+            .any(|a| a.starts_with("--type=crashpad-handler"))
+        {
             continue;
         }
         #[cfg(unix)]
