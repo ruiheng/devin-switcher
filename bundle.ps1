@@ -1,13 +1,13 @@
 # Release-build and copy installers to .\dist\
-# -NsisOnly skips the WiX MSI (smaller win than it looks: the release
-# compile dominates; MSI's candle/light is only ~half a minute).
-param([switch]$NsisOnly)
+# Default: NSIS only. -WithMsi also builds the WiX MSI (the release
+# compile dominates; MSI's candle/light adds ~half a minute).
+param([switch]$WithMsi)
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 Push-Location "$root\app"
 try {
-    if ($NsisOnly) { npx --yes @tauri-apps/cli@2 build --bundles nsis }
-    else { npx --yes @tauri-apps/cli@2 build }
+    if ($WithMsi) { npx --yes @tauri-apps/cli@2 build }
+    else { npx --yes @tauri-apps/cli@2 build --bundles nsis }
 } finally {
     Pop-Location
 }
