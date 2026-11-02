@@ -57,7 +57,6 @@ const I18N = {
     codeOrToken: "Code or token",
     codeOrTokenPh: "code or devin-session-token$…",
     saveToken: "Save",
-    savedAccounts: "SAVED ACCOUNTS",
     noProfiles: "No saved accounts yet.<br>Use + Add account above.",
     noProfilesSignedIn:
       "No saved accounts yet — the current sign-in isn't saved.",
@@ -79,12 +78,26 @@ const I18N = {
     used: "used",
     overage: "overage",
     planEnds: "plan ends",
+    upgToPro: "best Pro-upgrade window",
+    upgToMax: (d) => `Max upgrade · ~${d}d diff`,
+    upgLast: (d) => `Max upgrade, last-day · ~${d}d`,
+    upgNow: "optimal now",
+    upgAvail: "available now",
+    upgIn: (d) => `in ${d}`,
+    upgOver: "window passed",
+    upgProTip: (w) =>
+      `Subscribe 1–2 days before the Sunday reset (${w}) — the month then covers the most weekly quotas`,
+    upgMaxTip: (w) =>
+      `Upgrade within 1–2 days before the last reset in the cycle (${w}) — two weekly quotas for the smallest diff`,
     savedAs: (n) => `Saved as ${n}`,
     savedTok: (n) => `Saved ${n}`,
     signedInAs: (n) => `Signed in as ${n}`,
     refAll: "Refresh all",
     filterPh: "Filter…",
     noMatch: "No matching account",
+    vtabAccounts: "ACCOUNTS",
+    vtabOpps: "OPPORTUNITIES",
+    oppsEmpty: "No upgrade windows — no Free or Pro account with an active cycle.",
     copyHint: "Click to copy",
     copied: "Copied",
     switchedTo: (w) => `Switched to ${w}`,
@@ -154,7 +167,6 @@ const I18N = {
     codeOrToken: "Code 或令牌",
     codeOrTokenPh: "code 或 devin-session-token$…",
     saveToken: "保存",
-    savedAccounts: "已保存的账号",
     noProfiles: "还没有保存的账号。<br>点上方「+ 添加账号」。",
     noProfilesSignedIn: "还没有保存的账号——当前登录的账号未保存。",
     unknown: "未知账号",
@@ -175,12 +187,26 @@ const I18N = {
     used: "已用",
     overage: "超额余额",
     planEnds: "周期结束",
+    upgToPro: "升 Pro 最佳窗口",
+    upgToMax: (d) => `升 Max · ~${d}天差价`,
+    upgLast: (d) => `升 Max 末日窗口 · ~${d}天差价`,
+    upgNow: "现在最优",
+    upgAvail: "现在可升",
+    upgIn: (d) => `${d} 后`,
+    upgOver: "窗口已过",
+    upgProTip: (w) =>
+      `在周日重置（${w}）前 1–2 天订 Pro —— 一个月覆盖的周限额最多`,
+    upgMaxTip: (w) =>
+      `在周期内最后一次周日重置（${w}）前 1–2 天内升级 —— 差价最小、能拿两个周限额`,
     savedAs: (n) => `已保存为 ${n}`,
     savedTok: (n) => `已保存 ${n}`,
     signedInAs: (n) => `已登录 ${n}`,
     refAll: "刷新全部",
     filterPh: "过滤…",
     noMatch: "没有匹配的账号",
+    vtabAccounts: "账号",
+    vtabOpps: "升级良机",
+    oppsEmpty: "没有升级窗口 —— 没有处于有效订阅周期内的 Free 或 Pro 账号。",
     copyHint: "点击复制",
     copied: "已复制",
     switchedTo: (w) => `已切换到 ${w}`,
@@ -342,7 +368,7 @@ function renderStatus(s) {
     $("labelCli").dataset.copy = s.auth.email || "";
     $("subCli").innerHTML = [
       s.auth.name && s.auth.name !== s.auth.email ? esc(s.auth.name) : null,
-      planTag(s.auth.plan || s.auth.tier),
+      planTag(s.auth.plan || s.auth.tier, s.usage?.tier),
     ]
       .filter(Boolean)
       .join(" · ");
@@ -367,12 +393,11 @@ function renderStatus(s) {
     $("labelDesktop").textContent =
       s.desktop.email || s.desktop.name || s.desktop.label || t("signedIn");
     $("labelDesktop").dataset.copy = s.desktop.email || "";
-    const plan = s.desktop.usage?.plan;
     $("subDesktop").innerHTML = [
       (s.desktop.name || s.desktop.label) !== s.desktop.email
         ? esc(s.desktop.name || s.desktop.label)
         : null,
-      planTag(plan),
+      planTag(s.desktop.usage?.plan, s.desktop.usage?.tier),
     ]
       .filter(Boolean)
       .join(" · ");
@@ -470,6 +495,96 @@ function quotaHtml(u) {
   return rows.join("");
 }
 
+// ---- upgrade-timing hints ----
+// Weekly quota resets Sun 16:00 Beijing (08:00 UTC), fixed for every
+// account — u.weekly_reset_unix carries it, else computed. Free→Pro is
+// best 1–2 days before a reset (one month then covers the most weekly
+// windows). Pro→Max works before ANY reset — the upgrade resets quota
+// immediately, the Sunday reset refills it again — but the diff is
+// prorated on remaining cycle days, so the LAST reset in the cycle is
+// the sweet spot ("now-optimal"); earlier ones show as merely
+// "available". No reset left inside the cycle → last-day upgrade still
+// swaps ~1d diff for a fresh quota.
+const WEEK = 604800;
+function nextWeeklyReset(now, seed) {
+  if (seed) return seed;
+  const d = new Date(now * 1000);
+  let t = Math.floor(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8) / 1000
+  );
+  while (t <= now || new Date(t * 1000).getUTCDay() !== 0) t += 86400;
+  return t;
+}
+
+// The account's current upgrade window, or null: {k, w0, w1, pe, last}
+// — k = pro / max / last(day), w0..w1 the window, pe the plan end,
+// last = "1" when the Pro window targets the cycle's last reset.
+function upgWindow(p, u) {
+  const tier = tierOf(p.plan, u?.tier);
+  const now = Date.now() / 1000;
+  const R = nextWeeklyReset(Math.floor(now), u?.weekly_reset_unix);
+  if (tier === "FREE") {
+    return { k: "pro", w0: R - 2 * 86400, w1: R, pe: 0, last: "" };
+  }
+  if (tier !== "PRO" || !u?.plan_end) return null;
+  const end = Date.parse(u.plan_end) / 1000;
+  if (!(end > now)) return null;
+  if (R < end) {
+    // Next upcoming reset works too — flag whether it's the last one
+    // inside the cycle, which is what makes it optimal.
+    let rl = R;
+    while (rl + WEEK < end) rl += WEEK;
+    return { k: "max", w0: R - 2 * 86400, w1: R, pe: end, last: rl === R ? "1" : "" };
+  }
+  return { k: "last", w0: end - 2 * 86400, w1: end, pe: end, last: "" };
+}
+
+function upgradeHint(p, u) {
+  const w = upgWindow(p, u);
+  if (!w) return "";
+  const d = new Date(w.w1 * 1000);
+  const wt = `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(
+    d.getHours()
+  )}:${pad2(d.getMinutes())}`;
+  const tip = w.k === "pro" ? t("upgProTip", wt) : t("upgMaxTip", wt);
+  return (
+    `<div class="upg" title="${esc(tip)}" data-k="${w.k}" data-last="${w.last}" ` +
+    `data-w0="${Math.floor(w.w0)}" data-w1="${Math.floor(w.w1)}" data-pe="${Math.floor(
+      w.pe
+    )}"><div class="heat"><i></i></div><span class="upgtxt"></span></div>`
+  );
+}
+
+// Per-tick fill: the heat bar warms up over the ~5 days before the
+// window. Full heat (green) only for the optimal window — the cycle's
+// last reset; earlier resets are valid but cap at warm amber.
+function updateUpg(el) {
+  const now = Date.now() / 1000;
+  const w0 = +el.dataset.w0;
+  const w1 = +el.dataset.w1;
+  const pe = +el.dataset.pe;
+  const k = el.dataset.k;
+  const optimal = k !== "max" || el.dataset.last === "1";
+  const inWin = now >= w0 && now <= w1;
+  const heat = inWin
+    ? optimal ? 1 : 0.7
+    : Math.max(0, Math.min(1, 1 - (w0 - now) / (5 * 86400))) * (optimal ? 1 : 0.7);
+  const bar = el.querySelector(".heat i");
+  bar.style.width = `${Math.round(heat * 100)}%`;
+  bar.className = inWin ? (optimal ? "hot" : "warm") : heat > 0.35 ? "warm" : "";
+  const cost = Math.max(1, Math.ceil((pe - now) / 86400));
+  const what =
+    k === "pro"
+      ? t("upgToPro")
+      : k === "max"
+        ? t("upgToMax", cost)
+        : t("upgLast", cost);
+  const status = inWin
+    ? optimal ? t("upgNow") : t("upgAvail")
+    : now > w1 ? t("upgOver") : t("upgIn", planLeft(w0));
+  el.querySelector(".upgtxt").textContent = `${what} · ${status}`;
+}
+
 // Precise plan-end countdown — the API stamps a full RFC3339 instant,
 // not just a date, so granularity tightens as expiry nears: ≥7d shows
 // days, <7d adds hours, <1d is h+m, <1h is minutes. The same 1s ticker
@@ -487,8 +602,11 @@ function planLeft(unix) {
 
 const r2 = (f) => Math.round(f * 100) / 100;
 
-// The one tier rule — plan chips (class) and filter chips (key) share it.
-function tierOf(plan) {
+// The one tier rule — plan chips (class) and filter chips (key) share
+// it. `tier` is the server's teamsTier (authoritative — planName lags a
+// mid-cycle upgrade); regex on the plan text is the fallback.
+function tierOf(plan, tier) {
+  if (["MAX", "PRO", "FREE"].includes(tier)) return tier;
   return /max|ultra/i.test(plan || "")
     ? "MAX"
     : /pro|team|business/i.test(plan || "")
@@ -498,11 +616,14 @@ function tierOf(plan) {
         : "OTHER";
 }
 
-// Plan tier chip: free stays muted, pro = accent, max = gold.
-function planTag(plan) {
-  if (!plan) return "";
-  const cls = { MAX: "max", PRO: "pro" }[tierOf(plan)] || "";
-  return `<span class="plantag ${cls}">${esc(plan)}</span>`;
+// Plan tier chip: free stays muted, pro = accent, max = gold. Shows the
+// authoritative tier label when known (planName can be stale).
+function planTag(plan, tier) {
+  const t2 = tierOf(plan, tier);
+  const cls = { MAX: "max", PRO: "pro" }[t2] || "";
+  const label = tier || plan;
+  if (!label) return "";
+  return `<span class="plantag ${cls}">${esc(label)}</span>`;
 }
 
 // Relative reset — <24h is a live HH:MM:SS countdown (a bare date is
@@ -541,11 +662,54 @@ function quotaScore(u) {
   return w * 10 + (u.daily_left ?? w) * 0.1;
 }
 
+// Which usage a card shows: the live banner object when this account is
+// signed in somewhere, else its stored snapshot.
+function liveUsageOf(p, status) {
+  if (p.is_active) return status?.usage ?? p.usage;
+  if (p.desktop_active) return status?.desktop?.usage ?? p.usage;
+  return p.usage;
+}
+
+// Centralized upgrade windows live on their own tab — every window not
+// yet past is listed, soonest first, so the tab is never empty while an
+// account could still upgrade. Actionable = open now or opening within
+// ~1 day; only those count toward the badge and light the tab title,
+// and future rows render dimmed until their turn. Click a row to jump
+// back to that account's card.
+function renderOpps(profiles, status) {
+  const list = $("oppsList");
+  const now = Date.now() / 1000;
+  const rows = profiles
+    .map((p) => ({ p, u: liveUsageOf(p, status), w: upgWindow(p, liveUsageOf(p, status)) }))
+    .filter((r) => r.w && now <= r.w.w1)
+    .sort((a, b) => a.w.w0 - b.w.w0);
+  const actionable = rows.filter((r) => now >= r.w.w0 - 86400).length;
+  const badge = $("oppBadge");
+  badge.textContent = actionable;
+  badge.classList.toggle("hidden", !actionable);
+  $("tabOpps").classList.toggle("hot", actionable > 0);
+  $("oppsEmpty").classList.toggle("hidden", rows.length > 0);
+  list.innerHTML = rows
+    .map(
+      ({ p, u, w }) =>
+        `<div class="opprow${now < w.w0 - 86400 ? " future" : ""}" data-acct="${esc(
+          p.name
+        )}">` +
+        `<span class="oppname">${esc(p.email || p.display_name || p.name)}</span>` +
+        planTag(p.plan, u?.tier) +
+        upgradeHint(p, u) +
+        `</div>`
+    )
+    .join("");
+  list.querySelectorAll(".upg").forEach(updateUpg);
+}
+
 function renderProfiles(profiles, status, force = false) {
   const el = $("profiles");
   const active = profiles.find((p) => p.is_active);
   signedIn = !!status?.auth?.logged_in;
   activeSaved = !!active;
+  renderOpps(profiles, status);
   // Don't clobber an in-progress rename, armed delete, or busy card on
   // the 5s poll — an action's own refresh passes force to bypass this.
   if (!force && el.querySelector(".rename-in, .danger.armed, .busy, .menu"))
@@ -569,7 +733,7 @@ function renderProfiles(profiles, status, force = false) {
   // chip: lit = shown, dimmed = filtered out.
   const counts = {};
   profiles.forEach((p) => {
-    const k = tierOf(p.plan);
+    const k = tierOf(p.plan, p.usage?.tier);
     counts[k] = (counts[k] || 0) + 1;
   });
   const tc = $("tierCounts");
@@ -593,7 +757,7 @@ function renderProfiles(profiles, status, force = false) {
   const q = filterQuery.trim().toLowerCase();
   const shown = profiles.filter(
     (p) =>
-      !hiddenTiers.has(tierOf(p.plan)) &&
+      !hiddenTiers.has(tierOf(p.plan, p.usage?.tier)) &&
       (!q ||
         [p.email, p.name, p.display_name].some(
           (f) => f && f.toLowerCase().includes(q)
@@ -602,11 +766,7 @@ function renderProfiles(profiles, status, force = false) {
   // A card for the live account renders the SAME usage object the banner
   // shows — the banner refreshes every ~60s while meta snapshots can be
   // 5min stale, so without this the same account could show two numbers.
-  const usageOf = (p) => {
-    if (p.is_active) return status?.usage ?? p.usage;
-    if (p.desktop_active) return status?.desktop?.usage ?? p.usage;
-    return p.usage;
-  };
+  const usageOf = (p) => liveUsageOf(p, status);
   const sorted = [...shown].sort(
     (a, b) => quotaScore(usageOf(b)) - quotaScore(usageOf(a))
   );
@@ -628,6 +788,7 @@ function renderProfiles(profiles, status, force = false) {
         : "all"
       : "desktop";
     const card = document.createElement("div");
+    card.dataset.acct = p.name;
     card.className =
       "profile" +
       (bothActive
@@ -647,7 +808,7 @@ function renderProfiles(profiles, status, force = false) {
         <span class="name copyable" title="${esc(t("copyHint"))}">${esc(
           p.email || p.display_name || p.name
         )}</span>
-        ${planTag(p.plan)}
+        ${planTag(p.plan, p.usage?.tier)}
         <span class="pname" title="${esc(t("renHint"))}">@${esc(p.name)}</span>
         ${p.is_active ? `<span class="badge">${t("cliTag")}</span>` : ""}
         ${deskActive ? `<span class="badge desk">${t("desktopTag")}</span>` : ""}
@@ -657,6 +818,7 @@ function renderProfiles(profiles, status, force = false) {
         <div class="quota">${quotaHtml(usageOf(p))}</div>
         <button class="icobtn" data-act="ref" title="${t("swRef")}">↻</button>
       </div>
+      ${upgradeHint(p, usageOf(p))}
       ${p.note ? `<div class="note">${esc(p.note)}</div>` : ""}
       ${
         bothActive
@@ -673,6 +835,11 @@ function renderProfiles(profiles, status, force = false) {
                 : ""
             }</span><button data-act="par">${t("swPar")}</button></div>`
       }`;
+    // Fill the upgrade hint NOW — the ticker only fires once a second,
+    // and cards rebuild every poll, so without this the bar flashes
+    // 0→full and the text sits empty on every re-render.
+    const upg = card.querySelector(".upg");
+    if (upg) updateUpg(upg);
     const useBtn = card.querySelector('[data-act="use"]');
     if (useBtn)
       useBtn.onclick = () => pend(card, () => useProfile(p.name, mainScope));
@@ -924,6 +1091,31 @@ for (const id of ["labelCli", "labelDesktop"]) {
   };
 }
 
+// Main view tabs — accounts list vs the opportunities rollup.
+function setView(v) {
+  localStorage.setItem("ui_tab", v);
+  const opps = v === "opps";
+  $("tabAccounts").classList.toggle("active", !opps);
+  $("tabOpps").classList.toggle("active", opps);
+  $("viewAccounts").classList.toggle("hidden", opps);
+  $("viewOpps").classList.toggle("hidden", !opps);
+  document
+    .querySelectorAll(".acct-only")
+    .forEach((e) => e.classList.toggle("hidden", opps));
+}
+$("tabAccounts").onclick = () => setView("accounts");
+$("tabOpps").onclick = () => setView("opps");
+
+// Jump from an upgrade-window row to that account's card.
+$("oppsList").onclick = (e) => {
+  const row = e.target.closest("[data-acct]");
+  if (!row) return;
+  setView("accounts");
+  document
+    .querySelector(`.profile[data-acct="${CSS.escape(row.dataset.acct)}"]`)
+    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+};
+
 $("filterIn").oninput = (e) => {
   filterQuery = e.currentTarget.value;
   if (lastStatus) renderProfiles(lastProfiles, lastStatus, true);
@@ -1060,6 +1252,7 @@ setInterval(() => {
   document.querySelectorAll("[data-reset]").forEach((el) => {
     el.textContent = resetText(+el.dataset.reset);
   });
+  document.querySelectorAll(".upg").forEach(updateUpg);
   document.querySelectorAll("[data-planend]").forEach((el) => {
     const unix = +el.dataset.planend;
     el.textContent = planLeft(unix);
@@ -1071,6 +1264,7 @@ setInterval(() => {
 }, 1000);
 
 applyI18n();
+setView(localStorage.getItem("ui_tab") || "accounts");
 setInterval(() => {
   if (!refreshing) refresh();
 }, 5000);

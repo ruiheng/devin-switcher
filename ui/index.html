@@ -34,15 +34,24 @@
   </header>
 
   <div class="sectag">
-    <span data-i18n="savedAccounts">SAVED ACCOUNTS</span>
-    <span id="tierCounts" class="tierc"></span>
-    <input id="filterIn" class="filter" data-i18n-ph="filterPh" placeholder="Filter…">
+    <div class="viewtabs">
+      <button id="tabAccounts" class="vtab active" data-i18n="vtabAccounts">ACCOUNTS</button>
+      <button id="tabOpps" class="vtab"><span data-i18n="vtabOpps">OPPORTUNITIES</span><span id="oppBadge" class="oppbadge hidden"></span></button>
+    </div>
+    <span id="tierCounts" class="tierc acct-only"></span>
+    <input id="filterIn" class="filter acct-only" data-i18n-ph="filterPh" placeholder="Filter…">
     <button id="refAll" data-i18n="refAll">Refresh all</button>
     <button id="addBtn" data-i18n="addAccount">+ Add account</button>
   </div>
   <main>
-    <div id="warnBanner" class="warn hidden"></div>
-    <section id="profiles" class="profiles"></section>
+    <div id="viewAccounts">
+      <div id="warnBanner" class="warn hidden"></div>
+      <section id="profiles" class="profiles"></section>
+    </div>
+    <section id="viewOpps" class="hidden">
+      <div id="oppsList"></div>
+      <p id="oppsEmpty" class="sub empty hidden" data-i18n="oppsEmpty">No actionable upgrade windows right now.</p>
+    </section>
   </main>
 
   <!-- Add account sheet -->

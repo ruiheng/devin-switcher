@@ -20,6 +20,10 @@ pub struct Usage {
     /// `user-<hex>` — needed for Devin Desktop's session record.
     pub user_id: String,
     pub plan: String,
+    /// Simplified tier from planInfo.teamsTier — the authoritative plan
+    /// level: planName stays stale after a mid-cycle upgrade (Pro→Max
+    /// shows "Pro" while teamsTier is already DEVIN_MAX).
+    pub tier: String,
     pub org_id: Option<String>,
     /// Billing-cycle end, RFC3339.
     pub plan_end: Option<String>,
@@ -219,6 +223,13 @@ fn parse_user_status(body: &serde_json::Value) -> Result<Usage, String> {
             .and_then(|e| e.as_str())
             .unwrap_or("")
             .into(),
+        tier: info
+            .get("teamsTier")
+            .and_then(|e| e.as_str())
+            .and_then(|s| s.strip_prefix("TEAMS_TIER_DEVIN_"))
+            .filter(|s| matches!(*s, "MAX" | "PRO" | "FREE"))
+            .unwrap_or("")
+            .into(),
         org_id: devin
             .get("orgId")
             .and_then(|e| e.as_str())
@@ -273,9 +284,10 @@ mod tests {
 
     #[test]
     fn parse_max_hides_daily() {
-        let body = serde_json::json!({"userStatus":{"email":"m@x.com","name":"M","userId":"user-1","planStatus":{"planInfo":{"planName":"Max","hideDailyQuota":true,"devinInfo":{"orgId":"org-1"}},"planStart":"2026-10-02T15:59:59Z","planEnd":"2026-11-02T15:59:59Z","dailyQuotaRemainingPercent":100,"weeklyQuotaRemainingPercent":15,"overageBalanceMicros":"-63845","dailyQuotaResetAtUnix":"1793260800","weeklyQuotaResetAtUnix":"1793520000"}}});
+        let body = serde_json::json!({"userStatus":{"email":"m@x.com","name":"M","userId":"user-1","planStatus":{"planInfo":{"planName":"Pro","teamsTier":"TEAMS_TIER_DEVIN_MAX","hideDailyQuota":true,"devinInfo":{"orgId":"org-1"}},"planStart":"2026-10-02T15:59:59Z","planEnd":"2026-11-02T15:59:59Z","dailyQuotaRemainingPercent":100,"weeklyQuotaRemainingPercent":15,"overageBalanceMicros":"-63845","dailyQuotaResetAtUnix":"1793260800","weeklyQuotaResetAtUnix":"1793520000"}}});
         let u = parse_user_status(&body).unwrap();
-        assert_eq!(u.plan, "Max");
+        assert_eq!(u.plan, "Pro", "planName can lag a mid-cycle upgrade");
+        assert_eq!(u.tier, "MAX", "teamsTier is the authoritative level");
         assert_eq!(u.org_id.as_deref(), Some("org-1"));
         assert!(u.plan_end.is_some());
         assert_eq!(u.daily_left, None);
@@ -287,8 +299,9 @@ mod tests {
 
     #[test]
     fn parse_free() {
-        let body = serde_json::json!({"userStatus":{"email":"f@x.com","userId":"user-2","planStatus":{"planInfo":{"planName":"Free","devinInfo":{"orgId":""}},"availablePromptCredits":2500,"dailyQuotaRemainingPercent":100,"weeklyQuotaRemainingPercent":100,"dailyQuotaResetAtUnix":"1793606400","weeklyQuotaResetAtUnix":"1794124800"}}});
+        let body = serde_json::json!({"userStatus":{"email":"f@x.com","userId":"user-2","planStatus":{"planInfo":{"planName":"Free","teamsTier":"TEAMS_TIER_DEVIN_FREE","devinInfo":{"orgId":""}},"availablePromptCredits":2500,"dailyQuotaRemainingPercent":100,"weeklyQuotaRemainingPercent":100,"dailyQuotaResetAtUnix":"1793606400","weeklyQuotaResetAtUnix":"1794124800"}}});
         let u = parse_user_status(&body).unwrap();
+        assert_eq!(u.tier, "FREE");
         assert_eq!(u.plan_end, None);
         assert_eq!(u.org_id, None, "empty org filtered");
         assert_eq!(u.daily_left, Some(100.0));
